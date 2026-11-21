@@ -8,6 +8,8 @@ LaTeX Modeler is proprietary software (see `LICENSE`), but it includes the open-
 | [three.js](https://threejs.org) 0.160 | 3D rendering | MIT | © 2010–2023 three.js authors |
 | [Inter](https://rsms.me/inter/) (via Fontsource) | interface font | SIL Open Font License 1.1 | © The Inter Project Authors |
 | [JetBrains Mono](https://www.jetbrains.com/lp/mono/) (via Fontsource) | code font | SIL Open Font License 1.1 | © The JetBrains Mono Project Authors |
+| [mp4-muxer](https://github.com/Vanilagy/mp4-muxer) 5.2 | writing MP4 video files | MIT | © Vanilagy |
+| [gifenc](https://github.com/mattdesl/gifenc) 1.0 | writing animated GIFs | MIT | © 2017 Matt DesLauriers |
 | [Tauri](https://tauri.app) 2 and its Rust and JavaScript packages | desktop app | MIT or Apache License 2.0 | © Tauri Programme within The Commons Conservancy |
 
 MathJax is redistributed unmodified. Exported interactive HTML pages contain MathJax and three.js and carry a notice naming them and their licenses.

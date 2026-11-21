@@ -13,6 +13,7 @@ import type { ModelResult } from './model/generate';
 import { getPlatform, Platform } from './platform';
 import { REFERENCE } from './ui/reference';
 import { shareLink, readShare } from './share';
+import { record, supportedFormats, type RecFormat } from './render/record';
 import type { Explorer } from './explore/explorer';
 import { FigureChips, type ExploreTarget } from './explore/chips';
 
@@ -169,7 +170,7 @@ function compile(force: boolean) {
   const warnings: { line: number; msg: string }[] = [];
   viewer.build(ctx, warnings);
   chips.update(ctx);
-  if (!playing) viewer.highlight(editorRecs());
+  if (!playing && !recordingNow) viewer.highlight(editorRecs());
   problems = [...warnings.map(w => ({ sev: 'w' as const, ...w })), ...modelWarnings.map(m => ({ sev: 'w' as const, line: 0, msg: m }))];
   lastCtx = ctx; usesT = ctx.usesT; output = ctx.out;
   duration = ctx.duration ?? 6; slider.max = String(duration); if (tCur > duration) tCur = duration;
@@ -316,6 +317,7 @@ async function doExport(kind: string) {
   if (!lastCtx) { toast('fix the errors first'); return; }
   if (kind === 'html') { await exportHTML(); return; }
   if (kind === 'share') { await exportShare(); return; }
+  if (kind === 'video') { exportVideo(); return; }
   if (kind === 'code') { try { await navigator.clipboard.writeText(editor.value); toast('page code copied'); } catch { toast('copy was blocked — select the code and press Ctrl+C'); } return; }
   let name: string, data: string | Uint8Array, mime: string, previewUrl: string;
   if (kind === 'svg') {
@@ -420,6 +422,71 @@ async function exportHTML() {
   $('xCompact').onclick = () => save(compact);
 }
 (window as any).__buildHTML = buildStandaloneHTML;
+
+// ---- video / GIF: render the view frame by frame while the camera moves and/or the timeline plays
+let recordingNow = false;
+function exportVideo() {
+  if (!lastCtx) { toast('fix the errors first'); return; }
+  const fmts = supportedFormats(); const anim = usesT || !!lastCtx.cam;
+  const fmtLabel: Record<RecFormat, string> = { mp4: 'MP4 video', webm: 'WebM video', gif: 'Animated GIF' };
+  modal(`<h3>Record a video</h3>
+    <div class="vgrid" style="display:grid;grid-template-columns:110px 1fr;gap:8px 12px;align-items:center;margin:8px 0 12px">
+      <label>Motion</label><select id="vMotion">
+        ${anim ? '<option value="anim">Play the page\'s animation (camera as on screen)</option><option value="tour">Play the animation with the camera tour</option>' : ''}
+        <option value="swing">Swing around the page</option><option value="turn">Full turn around the page</option></select>
+      <label>Length</label><span><input id="vLen" type="number" min="1" max="60" step="0.5" value="${anim ? (+duration.toFixed(2)) : 6}" style="width:70px"> seconds</span>
+      <label>Size</label><select id="vSize"><option value="1280x720">1280 × 720 (HD)</option><option value="1920x1080">1920 × 1080 (Full HD)</option><option value="1080x1080">1080 × 1080 (square)</option><option value="1080x1350">1080 × 1350 (portrait)</option><option value="640x360">640 × 360 (small)</option></select>
+      <label>Format</label><select id="vFmt">${fmts.map(f => `<option value="${f}">${fmtLabel[f]}</option>`).join('')}</select>
+    </div>
+    <div id="vProg" style="display:none;height:6px;background:#333;border-radius:3px;overflow:hidden;margin:6px 0 10px"><div style="height:100%;width:0;background:#36b4ff"></div></div>
+    <div id="vOut"></div>
+    <div class="row"><span id="vInfo">${fmts.includes('mp4') ? 'MP4 plays everywhere (phones, PowerPoint, YouTube).' : 'This browser can\'t make MP4; WebM plays in browsers and on YouTube.'} GIFs are larger and limited to 256 colours.</span>
+      <button class="vbtn" id="vClose">Close</button><button class="vbtn primary" id="vGo">Record</button></div>`);
+  const fmtSel = $<HTMLSelectElement>('vFmt'), sizeSel = $<HTMLSelectElement>('vSize');
+  fmtSel.onchange = () => { if (fmtSel.value === 'gif' && sizeSel.value !== '640x360') sizeSel.value = '640x360'; };
+  let cancel = false, busy = false;
+  $('vClose').onclick = () => { if (busy) { cancel = true; return; } closeModal(); };
+  $('vGo').onclick = async () => {
+    if (busy) return; busy = true; cancel = false;
+    const motion = $<HTMLSelectElement>('vMotion').value, fmt = fmtSel.value as RecFormat;
+    const [W, H] = sizeSel.value.split('x').map(Number), secs = Math.max(1, Math.min(60, +$<HTMLInputElement>('vLen').value || 6));
+    const fps = fmt === 'gif' ? 15 : 30, frames = Math.round(secs * fps);
+    const bar = $('vProg'); bar.style.display = ''; const fill = bar.firstElementChild as HTMLElement;
+    $('vGo').textContent = 'Recording…'; $('vClose').textContent = 'Cancel'; $('vOut').innerHTML = '';
+    // remember the view and time so they can be put back afterwards
+    const cam = viewer.camera, saved = { pos: cam.position.clone(), quat: cam.quaternion.clone(), up: cam.up.clone(), zoom: (cam as any).zoom, target: viewer.controls.target.clone(), t: tCur, playing, follow: followCam };
+    setPlaying(false); viewer.highlight([]); recordingNow = true;
+    const animDur = duration || secs;
+    try {
+      const res = await record(viewer, {
+        width: W, height: H, fps, frames, format: fmt, cancelled: () => cancel,
+        onProgress: f => { fill.style.width = (f * 100).toFixed(1) + '%'; },
+        setFrame: i => {
+          const u = i / frames;
+          if (motion === 'anim' || motion === 'tour') {
+            tCur = (animDur * i / frames) % animDur; updateTime(); if (usesT) compile(false);
+            if (motion === 'tour' || lastCtx?.cam) applyCam(); else viewer.controls.update();
+          } else if (motion === 'swing') viewer.place(0.85 * Math.sin(2 * Math.PI * u), 0.22 + 0.12 * Math.sin(4 * Math.PI * u), 1);
+          else viewer.place(2 * Math.PI * u, 0.3, 1.05);
+        },
+      });
+      if (res) {
+        const name = baseName() + '.' + res.ext;
+        const url = URL.createObjectURL(new Blob([res.data as BlobPart], { type: res.mime }));
+        $('vOut').innerHTML = (res.ext === 'gif' ? `<img src="${url}" style="max-width:100%;max-height:300px;display:block;margin:0 auto 10px">` : `<video src="${url}" controls autoplay loop muted style="max-width:100%;max-height:300px;display:block;margin:0 auto 10px"></video>`)
+          + `<div class="row"><span>${esc(name)} · ${res.data.length < 1048576 ? Math.max(1, Math.round(res.data.length / 1024)) + " KB" : (res.data.length / 1048576).toFixed(1) + " MB"}</span><button class="vbtn primary" id="vSave">Download</button></div>`;
+        $('vSave').onclick = () => platform.exportFile(name, res.data, res.mime).then(ok => { if (ok && platform.kind === 'desktop') toast('saved ' + name); });
+      } else toast('recording cancelled');
+    } catch (e: any) { toast('recording failed: ' + (e?.message || e)); }
+    finally {
+      busy = false; recordingNow = false; bar.style.display = 'none'; fill.style.width = '0';
+      const b = document.getElementById('vGo'); if (b) b.textContent = 'Record again'; const c = document.getElementById('vClose'); if (c) c.textContent = 'Close';
+      tCur = saved.t; updateTime(); if (usesT) compile(false);
+      const cm = viewer.camera; cm.position.copy(saved.pos); cm.quaternion.copy(saved.quat); cm.up.copy(saved.up); if (saved.zoom) { (cm as any).zoom = saved.zoom; (cm as any).updateProjectionMatrix?.(); }
+      viewer.controls.target.copy(saved.target); viewer.controls.update(); followCam = saved.follow; viewer.dirty = true;
+    }
+  };
+}
 
 // ---- share links: the page's code travels inside the link itself
 async function exportShare() {

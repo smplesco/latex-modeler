@@ -95,7 +95,11 @@ export class Viewer {
     this.camera.lookAt(target); this.controls.update(); this.dirty = true;
   }
   get isOrtho() { return this.camera === this.ortho; }
-  size(): [number, number] { const r = this.el.getBoundingClientRect(); return [Math.max(1, r.width), Math.max(1, r.height)]; }
+  /** while recording video, the viewer renders at a fixed output size instead of its on-screen size */
+  captureSize: [number, number] | null = null; private savedPR = 1;
+  size(): [number, number] { if (this.captureSize) return this.captureSize; const r = this.el.getBoundingClientRect(); return [Math.max(1, r.width), Math.max(1, r.height)]; }
+  beginCapture(w: number, h: number) { this.savedPR = this.renderer.getPixelRatio(); this.captureSize = [w, h]; this.renderer.setPixelRatio(1); this.resize(); }
+  endCapture() { this.captureSize = null; this.renderer.setPixelRatio(this.savedPR); this.resize(); this.lastDyn = ''; this.dirty = true; }
   fitHeight() { const [w, h] = this.size(); return Math.max(this.page.h, this.page.w / (w / h)) * 1.08; }
   updateOrtho() { const [w, h] = this.size(); const a = w / h; Object.assign(this.ortho, { left: -this.orthoH * a / 2, right: this.orthoH * a / 2, top: this.orthoH / 2, bottom: -this.orthoH / 2 }); this.ortho.updateProjectionMatrix(); }
   resize() {

@@ -20,7 +20,9 @@
     "@tauri-apps/api": "^2.1.1",
     "@tauri-apps/plugin-dialog": "^2.0.1",
     "@tauri-apps/plugin-fs": "^2.0.1",
+    "gifenc": "^1.0.3",
     "mathjax": "3.2.2",
+    "mp4-muxer": "^5.2.2",
     "three": "0.160.0"
   },
   "devDependencies": {
