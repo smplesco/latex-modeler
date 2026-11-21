@@ -34,6 +34,7 @@ export interface ExplorerHost {
   measure?: (s: string) => number | null;
   writeBack?: (name: string, value: number, line: number) => void;
   snapshot?: (dataUrl: string, name: string) => void;
+  save?: (name: string, data: Uint8Array, mime: string) => void;
   title?: () => string;
 }
 
@@ -188,6 +189,9 @@ export class Explorer {
           <h5>Pins <span style="text-transform:none;letter-spacing:0;font-weight:400">— ${TOUCH ? "tap a point, then Pin" : "click the figure to pin a point"}</span></h5>
           <div class="xp-pins"><span class="xp-empty">no pins yet</span></div>
           <div class="xp-row"><button class="xp-b" data-a="copypins">Copy</button><button class="xp-b" data-a="clearpins">Clear</button></div>
+          <h5>Export</h5>
+          <div class="xp-row"><button class="xp-b" data-a="glb" title="Colours, curves and labels — for Blender, PowerPoint (Insert → 3D Model), Windows 3D Viewer, web viewers">3D model (GLB)</button>
+          <button class="xp-b" data-a="stl" title="The surfaces as solid 1.2 mm shells, in millimetres, ready for a slicer">STL for 3D printing</button></div>
         </aside>
       </div>`;
     parent.appendChild(this.el);
@@ -369,6 +373,8 @@ export class Explorer {
       case 'reset': this.ranges = null; this.equal = null; this.overrides = {}; this.buildParams(); this.rebuild(true, true); break;
       case 'snap': { const url = v!.snapshotView(); if (this.host.snapshot) this.host.snapshot(url, 'figure-' + (this.idx + 1) + '.png'); else window.open(url); break; }
       case 'tpin': if (this.lastProbe) { this.pinData.push({ kind: 'pt', p: this.lastProbe.p, text: this.lastProbe.text }); this.refreshPins(); } (this.q('.xp-tpin') as HTMLElement).style.display = 'none'; break;
+      case 'glb': this.export3d('glb'); break;
+      case 'stl': this.export3d('stl'); break;
       case 'clearpins': this.pinData = []; this.refreshPins(); break;
       case 'copypins': navigator.clipboard?.writeText(this.pinText()).catch(() => {}); break;
     }
@@ -633,6 +639,25 @@ export class Explorer {
     this.read(lines.join('\n'));
   }
 
+  private async export3d(kind: 'glb' | 'stl') {
+    const v = this.viewer; if (!v) return;
+    const base = (this.host.title?.() ?? 'figure').replace(/\.bd$/, '') + '-figure-' + (this.fig !== null ? 'drawing' : this.idx + 1);
+    const save = (name: string, data: Uint8Array, mime: string) => {
+      if (this.host.save) this.host.save(name, data, mime);
+      else { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([data as BlobPart], { type: mime })); a.download = name; a.click(); }
+    };
+    try {
+      const { toGLB, toSTL } = await import('../render/export3d');
+      // the explorer draws the figure already turned to the page's viewing angle; undo that so its own z axis is up
+      const unrotate = this.dim === 3 && this.R ? inv3(this.R) : undefined;
+      if (kind === 'glb') { save(base + '.glb', await toGLB(v.content, { unrotate }), 'model/gltf-binary'); return; }
+      const meshes = v.picks.filter(r => r.kind === 'area' && r.prim?.kind === 'trimesh' && r.objs.some(o => o.visible)).flatMap(r => r.objs.filter((o: any) => o.isMesh)) as THREE.Mesh[];
+      if (!meshes.length) { this.read('There is no surface in this figure to print. STL needs a surface (z = f(x, y), a parametric or implicit surface); use GLB for curves and labels.'); return; }
+      const { data, triangles, size } = toSTL(meshes, 1.2, unrotate);
+      save(base + '.stl', data, 'model/stl');
+      this.read(`STL saved: ${triangles.toLocaleString()} triangles,\n${size.map(x => Math.round(x)).join(' × ')} mm (x × y × z, z up).\nSurfaces are thickened into 1.2 mm shells;\nscale it in your slicer if you want it smaller.`);
+    } catch (e: any) { this.read('Export failed: ' + (e?.message || e)); }
+  }
   private showTouchPin() { (this.q('.xp-tpin') as HTMLElement).style.display = this.lastProbe ? '' : 'none'; }
   private showFrameUI(on: boolean) {
     for (const s of ['.xp-hshow', '.xp-tools', '.xp-hrange', '.xp-range']) (this.q(s) as HTMLElement).style.display = on ? '' : 'none';

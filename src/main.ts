@@ -66,6 +66,7 @@ const getExplorer = () => (explorerLoad ??= import('./explore/explorer').then(m 
     toast(`${name} = ${+value.toPrecision(6)} written to line ${line}`);
   },
   snapshot: (url, name) => exportImage(url, name),
+  save: (name, data, mime) => { platform.exportFile(name, data, mime).then(ok => { if (ok && platform.kind === 'desktop') toast('saved ' + name); }).catch((e: any) => toast('export failed: ' + (e?.message || e))); },
 }))));
 const openExplore = (t: ExploreTarget) => getExplorer().then(x => x.openTarget(t)).catch(e => toast('could not open the explorer: ' + (e?.message || e)));
 const chips = new FigureChips($('gl'), viewer, openExplore);
@@ -318,6 +319,11 @@ async function doExport(kind: string) {
   if (kind === 'html') { await exportHTML(); return; }
   if (kind === 'share') { await exportShare(); return; }
   if (kind === 'video') { exportVideo(); return; }
+  if (kind === 'glb') {
+    try { const { toGLB } = await import('./render/export3d'); const data = await toGLB(viewer.content, { skipTextured: true }); await platform.exportFile(baseName() + '.glb', data, 'model/gltf-binary'); if (platform.kind === 'desktop') toast('exported ' + baseName() + '.glb'); }
+    catch (e: any) { toast('3D export failed: ' + (e?.message || e)); }
+    return;
+  }
   if (kind === 'code') { try { await navigator.clipboard.writeText(editor.value); toast('page code copied'); } catch { toast('copy was blocked — select the code and press Ctrl+C'); } return; }
   let name: string, data: string | Uint8Array, mime: string, previewUrl: string;
   if (kind === 'svg') {
