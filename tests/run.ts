@@ -41,11 +41,30 @@ for (const input of [...MODEL_EXAMPLES.map(e => e.tex), ...EXTRA]) {
   }
 }
 // inputs that must fail gracefully with a readable message
-for (const input of ['e^{i\\pi}', '\\int_0^1 x^2 \\, dx', '\\lim_{x \\to 0} x', 'y = ', '\\frac{1}{', 'y = \\foo x', "y'' = -y"]) {
+for (const input of ['e^{i\\pi}', '\\int_0^1 x^2', '\\iint_D x\\,dA', '\\lim x', 'y = ', '\\frac{1}{', 'y = \\foo x', "y'' = -y"]) {
   n++;
   const r = autoModel(input);
   if (r.ok) { fail++; console.log(`✗ expected an error for ${input}`); }
   else console.log(`✓ error     ${input.padEnd(28)} → ${r.error}`);
+}
+// calculus answers: the page must state the right value (exact form where one is recognised)
+const CALC: [string, string, string][] = [
+  ['\\int_0^1 x^2\\,dx', 'integral', '\\frac{1}{3}'], ['\\int_0^{\\pi} \\sin x\\,dx', 'integral', '= 2'], ['\\int_{-\\infty}^{\\infty} e^{-x^2}\\,dx', 'integral', '\\sqrt{\\pi}'],
+  ['\\int_0^1 \\frac{dx}{\\sqrt{x}}', 'integral', '= 2'], ['\\int_1^{\\infty} \\frac{1}{x}\\,dx', 'integral', 'diverges'], ['\\int_{-\\infty}^{\\infty} \\frac{1}{1+x^2}\\,dx', 'integral', '\\pi'],
+  ['F(x) = \\int_0^x \\cos(t^2)\\,dt', 'accum', "F'(x) = f(x)"], ['\\int x e^{-x}\\,dx', 'accum', 'F(x) + C'],
+  ['\\lim_{x \\to 0} \\frac{\\sin x}{x}', 'limit', '= 1'], ['\\lim_{n \\to \\infty} \\left(1 + \\frac{1}{n}\\right)^n', 'limit', '= e'], ['\\lim_{x \\to 0^+} x \\ln x', 'limit', '= 0'],
+  ['\\lim_{x \\to 0} \\frac{|x|}{x}', 'limit', 'does not exist'], ['\\lim_{x \\to \\infty} \\frac{3x^2+1}{x^2-5}', 'limit', '= 3'], ['\\lim_{x \\to 0} \\frac{1}{x^2}', 'limit', '\\infty'],
+  ['\\lim_{x \\to 0} \\frac{1 - \\cos x}{x^2}', 'limit', '\\frac{1}{2}'], ['\\lim_{x \\to 0} \\frac{\\sin x - x}{x^3}', 'limit', '-\\frac{1}{6}'], ['\\lim_{x \\to 0} \\sin\\frac{1}{x}', 'limit', 'does not exist'],
+  ['\\sum_{n=1}^{\\infty} \\frac{1}{n^2}', 'series', '\\frac{\\pi^2}{6}'], ['\\sum_{n=1}^{\\infty} \\frac{1}{n}', 'series', 'diverges'], ['\\sum_{n=0}^{\\infty} \\frac{(-1)^n}{2n+1}', 'series', '\\frac{\\pi}{4}'],
+  ['\\sum_{n=1}^{\\infty} \\frac{1}{n^4}', 'series', '\\frac{\\pi^4}{90}'], ['\\sum_{n=0}^{\\infty} \\frac{x^n}{n!}', 'series', 'R = \\infty'], ['\\sum_{n=1}^{\\infty} \\frac{x^n}{n}', 'series', 'R = 1'],
+];
+for (const [input, kind, want] of CALC) {
+  n++;
+  const r = autoModel(input);
+  if (!r.ok) { fail++; console.log(`✗ calculus  ${input}: ${r.error}`); continue; }
+  try { for (const t of [0, 2.5, 7.9]) runProgram(r.code!, t, { measure: () => 10 }); } catch (e: any) { fail++; console.log(`✗ calculus  ${input}: line ${e.line}: ${e.message}`); continue; }
+  if (r.kind !== kind || !r.code!.includes(want)) { fail++; console.log(`✗ calculus  ${input}: kind ${r.kind}, expected "${want}" on the page`); }
+  else console.log(`✓ calculus  ${kind.padEnd(9)} ${input.padEnd(44)} ${want}`);
 }
 // the hand-written examples must run too
 for (const f of readdirSync('src/examples').filter(f => f.endsWith('.bd'))) {

@@ -21,11 +21,12 @@ const INVERSE: Record<string, string> = { sin: 'asin', cos: 'acos', tan: 'atan',
 const SKIP_CMDS = new Set(['displaystyle', 'textstyle', 'scriptstyle', 'limits', 'nolimits', 'big', 'Big', 'bigg', 'Bigg', 'bigl', 'bigr', 'Bigl', 'Bigr', 'biggl', 'biggr', 'Biggl', 'Biggr',
   'quad', 'qquad', 'mathrm', 'mathit', 'boldmath', 'nonumber', 'notag', 'label', 'tag', 'cdotp', 'mathstrut', 'strut', 'phantom', 'hphantom', 'vphantom']);
 const REL_CMDS: Record<string, string> = { le: '<=', leq: '<=', leqslant: '<=', ge: '>=', geq: '>=', geqslant: '>=', lt: '<', gt: '>', ne: '!=', neq: '!=', approx: '=', equiv: '=', simeq: '=', coloneqq: '=', eqqcolon: '=', in: 'in', to: '=' };
+const GREEK_VARS = new Set(['theta', 'phi', 'varphi', 'alpha', 'beta', 'gamma', 'tau', 'rho', 'sigma', 'omega', 'lambda', 'mu', 'xi', 'eta', 'psi', 'chi', 'zeta', 'nu']);
 const UNICODE: [RegExp, string][] = [
   [/−|–/g, '-'], [/·|⋅|∙/g, '\\cdot '], [/×/g, '\\times '], [/÷/g, '\\div '], [/≤/g, '\\le '], [/≥/g, '\\ge '], [/≠/g, '\\ne '], [/≈/g, '\\approx '], [/∈/g, '\\in '],
   [/π/g, '\\pi '], [/θ/g, '\\theta '], [/φ|ϕ/g, '\\phi '], [/α/g, '\\alpha '], [/β/g, '\\beta '], [/γ/g, '\\gamma '], [/δ/g, '\\delta '], [/λ/g, '\\lambda '],
   [/μ/g, '\\mu '], [/ω/g, '\\omega '], [/ρ/g, '\\rho '], [/σ/g, '\\sigma '], [/τ/g, '\\tau '], [/ε/g, '\\epsilon '],
-  [/²/g, '^2'], [/³/g, '^3'], [/√/g, '\\sqrt '], [/∞/g, '\\infty '], [/±/g, '\\pm '], [/∓/g, '\\mp '], [/∑/g, '\\sum '], [/∏/g, '\\prod '],
+  [/²/g, '^2'], [/³/g, '^3'], [/√/g, '\\sqrt '], [/∞/g, '\\infty '], [/±/g, '\\pm '], [/∓/g, '\\mp '], [/∑/g, '\\sum '], [/∫/g, '\\int '], [/→/g, '\\to '], [/∏/g, '\\prod '],
 ];
 
 export function tokenize(input: string): Tok[] {
@@ -381,12 +382,66 @@ class LP {
           } else if (this.is('op', '^')) { this.next(); hi = this.scriptArg(); }
         }
         if (!lo || !hi) this.err(`\\${name} needs both bounds, like \\${name}_{n=1}^{10}`);
-        if (hi!.k === 'num' && !isFinite(hi!.v)) this.err('infinite sums are not supported — use a finite upper bound (e.g. 50)');
+        if (name === 'prod' && hi!.k === 'num' && !isFinite(hi!.v)) this.err('infinite products are not supported — use a finite upper bound (e.g. 50)');
         const body = this.term(true);
         return { k: 'sum', i, lo: lo!, hi: hi!, body, prod: name === 'prod' };
       }
-      case 'int': case 'iint': case 'iiint': case 'oint': this.err('integrals aren’t supported yet — try the integrand or its antiderivative');
-      case 'lim': this.err('limits aren’t supported yet');
+      case 'iint': case 'iiint': case 'oint': this.err('only single integrals are supported (\\int_a^b f(x)\\,dx)');
+      case 'int': {
+        let lo: Node | null = null, hi: Node | null = null;
+        for (let r = 0; r < 2; r++) {
+          if (this.is('op', '_')) { this.next(); lo = this.scriptArg(); }
+          else if (this.is('op', '^')) { this.next(); hi = this.scriptArg(); }
+        }
+        if (!!lo !== !!hi) this.err('give both limits of integration, like \\int_0^1 f(x)\\,dx');
+        // the integrand runs up to the differential "d<var>" at this nesting level
+        let depth = 0, j = this.i;
+        const isVar = (k: Tok | undefined) => !!k && (k.t === 'id' || (k.t === 'cmd' && GREEK_VARS.has(k.v)));
+        for (; j < this.t.length; j++) {
+          const k = this.t[j];
+          if (k.t === 'eof') { j = -1; break; }
+          if (k.t === 'open') depth++;
+          else if (k.t === 'close') { if (depth === 0) { j = -1; break; } depth--; }
+          else if (depth === 0 && (k.t === 'rel' || k.t === 'sep' || k.t === 'row' || (k.t === 'op' && (k.v === ',' || k.v === ';')))) { j = -1; break; }
+          else if (depth === 0 && k.t === 'id' && k.v === 'd' && isVar(this.t[j + 1])) break;
+        }
+        // \frac{dx}{g(x)}: the differential sits in the numerator
+        const T0 = this.t, i0 = this.i;
+        if (j < 0 && T0[i0]?.t === 'cmd' && T0[i0].v === 'frac' && T0[i0 + 1]?.t === 'open' && T0[i0 + 2]?.t === 'id' && T0[i0 + 2].v === 'd' && isVar(T0[i0 + 3]) && T0[i0 + 4]?.t === 'close') {
+          const vt = T0[i0 + 3]; this.i = i0 + 5;
+          const den = this.braced();
+          return { k: 'int', v: vt.v, vtex: vt.t === 'cmd' ? '\\' + vt.v : vt.v, lo, hi, body: pow(den, -1) };
+        }
+        if (j < 0) this.err('write the variable of integration, e.g. \\int_0^1 x^2\\,dx');
+        const vt = this.t[j + 1]; const v = vt.v, vtex = vt.t === 'cmd' ? '\\' + vt.v : vt.v;
+        const inner = this.t.slice(this.i, j);
+        let body: Node = N(1);
+        if (inner.length) {
+          const sub = new LP([...inner, { t: 'eof', v: '' }]); body = sub.expr();
+          if (!sub.is('eof')) this.err('could not read the integrand');
+        }
+        this.i = j + 2;
+        return { k: 'int', v, vtex, lo, hi, body };
+      }
+      case 'lim': {
+        if (!this.is('op', '_')) this.err('write limits like \\lim_{x \\to 0} f(x)');
+        this.next();
+        let toks: Tok[] = [];
+        if (this.is('open', '{')) {
+          this.next(); let depth = 0;
+          for (;;) { const k = this.next(); if (k.t === 'eof') this.err('missing “}” after \\lim_{'); if (k.t === 'open') depth++; if (k.t === 'close') { if (depth === 0) break; depth--; } toks.push(k); }
+        } else this.err('put the limit in braces: \\lim_{x \\to 0}');
+        // one-sided limits: 0^+, 0^-, 0^{+}
+        let dir = 0; const L = toks.length;
+        const sgn = (k: Tok | undefined) => (k && k.t === 'op' && (k.v === '+' || k.v === '-') ? (k.v === '+' ? 1 : -1) : 0);
+        if (L >= 2 && toks[L - 2].t === 'op' && toks[L - 2].v === '^' && sgn(toks[L - 1])) { dir = sgn(toks[L - 1]); toks = toks.slice(0, L - 2); }
+        else if (L >= 4 && toks[L - 4].t === 'op' && toks[L - 4].v === '^' && toks[L - 3].t === 'open' && sgn(toks[L - 2]) && toks[L - 1].t === 'close') { dir = sgn(toks[L - 2]); toks = toks.slice(0, L - 4); }
+        const sub = new LP([...toks, { t: 'eof', v: '' }]); const r = sub.relation();
+        if (r.k !== 'rel' || r.terms.length !== 2 || r.terms[0].k !== 'sym') this.err('write the limit as \\lim_{x \\to a}');
+        const vs = r.terms[0] as Extract<Node, { k: 'sym' }>;
+        const body = this.term();
+        return { k: 'lim', v: vs.n, vtex: vs.tex, to: r.terms[1], dir, body };
+      }
       case 'partial': case 'nabla': this.err('partial derivatives and ∇ aren’t supported in the input yet — write the function itself and the model will compute its derivatives');
       case 'cdot': case 'times': this.err('a multiplication sign needs something on its left');
     }

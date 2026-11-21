@@ -107,7 +107,9 @@ Type LaTeX in the box at the top of the viewer and press **Enter** (or pick one 
 
 You can add a domain after a comma: `y = \sin x, \; x \in [0, 4\pi]` or `z = x^2 - y^2, \; -1 \le x \le 1`.
 The parser also accepts implicit multiplication (`2\pi r`, `xy`), `\sin^2 x`, `\sqrt[3]{x}`, `|x|`, `\lfloor x \rfloor`, `\binom{n}{k}`, `n!`, `\pm`, `cases`, matrices, finite `\sum` / `\prod`, `30^\circ`, and Unicode (π, θ, ², ≤).
-Not supported yet: integrals, limits, partial-derivative notation as input, complex numbers, higher-order ODEs.
+Calculus: definite and improper integrals (shaded area, animated Riemann sums, exact value when it recognises one, like √π or π²/6), accumulation functions `F(x) = \int_0^x f(t)\,dt` and indefinite integrals, limits (two-sided, one-sided `0^+`, at infinity, sequences), and infinite series (partial sums, convergence verdict, ratio test) including power series in x (partial-sum curves and radius of convergence).
+
+Not supported yet: double integrals, partial-derivative notation as input, complex numbers, higher-order ODEs.
 
 ### The viewer
 

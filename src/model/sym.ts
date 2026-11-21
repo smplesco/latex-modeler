@@ -17,7 +17,9 @@ export type Node =
   | { k: 'deriv'; of: string; ofTex: string; wrt: string; order: number; paren?: boolean }
   | { k: 'alt'; a: Node[]; paren?: boolean }
   | { k: 'interval'; lo: Node; hi: Node; paren?: boolean }
-  | { k: 'stmts'; a: Node[]; paren?: boolean };
+  | { k: 'stmts'; a: Node[]; paren?: boolean }
+  | { k: 'int'; v: string; vtex: string; lo: Node | null; hi: Node | null; body: Node; paren?: boolean }
+  | { k: 'lim'; v: string; vtex: string; to: Node; dir: number; body: Node; paren?: boolean };
 
 export class MathError extends Error {}
 
@@ -53,6 +55,8 @@ export function key(n: Node): string {
     case 'pw': return '(pw ' + n.cases.map(c => key(c.v) + ' ' + (c.c ? key(c.c) : '_')).join(' ') + ')';
     case 'rel': return '(rel ' + n.ops.join(',') + ' ' + n.terms.map(key).join(' ') + ')';
     case 'sum': return `(${n.prod ? 'prod' : 'sum'} ${n.i} ${key(n.lo)} ${key(n.hi)} ${key(n.body)})`;
+    case 'int': return `(int ${n.v} ${n.lo ? key(n.lo) : '_'} ${n.hi ? key(n.hi) : '_'} ${key(n.body)})`;
+    case 'lim': return `(lim ${n.v} ${key(n.to)} ${n.dir} ${key(n.body)})`;
     case 'deriv': return `(d ${n.of} ${n.wrt} ${n.order})`;
     case 'alt': return '(alt ' + n.a.map(key).join(' ') + ')';
     case 'interval': return `(int ${key(n.lo)} ${key(n.hi)})`;
@@ -70,6 +74,8 @@ export function freeSyms(n: Node, out = new Set<string>(), bound = new Set<strin
     case 'pw': n.cases.forEach(c => { freeSyms(c.v, out, bound); if (c.c) freeSyms(c.c, out, bound); }); break;
     case 'rel': n.terms.forEach(x => freeSyms(x, out, bound)); break;
     case 'sum': { freeSyms(n.lo, out, bound); freeSyms(n.hi, out, bound); const b2 = new Set(bound); b2.add(n.i); freeSyms(n.body, out, b2); break; }
+    case 'int': { if (n.lo) freeSyms(n.lo, out, bound); if (n.hi) freeSyms(n.hi, out, bound); const b2 = new Set(bound); if (n.lo || n.hi) b2.add(n.v); freeSyms(n.body, out, b2); break; }
+    case 'lim': { freeSyms(n.to, out, bound); const b2 = new Set(bound); b2.add(n.v); freeSyms(n.body, out, b2); break; }
     case 'interval': freeSyms(n.lo, out, bound); freeSyms(n.hi, out, bound); break;
   }
   return out;
@@ -88,6 +94,8 @@ export function children(n: Node): Node[] {
     case 'pw': return n.cases.flatMap(c => (c.c ? [c.v, c.c] : [c.v]));
     case 'rel': return n.terms;
     case 'sum': return [n.lo, n.hi, n.body];
+    case 'int': return [...(n.lo ? [n.lo] : []), ...(n.hi ? [n.hi] : []), n.body];
+    case 'lim': return [n.to, n.body];
     case 'interval': return [n.lo, n.hi];
     default: return [];
   }
@@ -433,6 +441,8 @@ export function toTex(n: Node, prec = 0): string {
     case 'pw': return `\\begin{cases} ${n.cases.map(c => `${toTex(c.v)} & ${c.c ? toTex(c.c) : '\\text{otherwise}'}`).join(' \\\\ ')} \\end{cases}`;
     case 'rel': return n.terms.map(x => toTex(x)).reduce((s, t, i) => s + (i ? ` ${REL_TEX[n.ops[i - 1]] ?? n.ops[i - 1]} ` : '') + t, '');
     case 'sum': return wrap(`${n.prod ? '\\prod' : '\\sum'}_{${n.i}=${toTex(n.lo)}}^{${toTex(n.hi)}} ${toTex(n.body, 2)}`, 1.5);
+    case 'int': return wrap(`\\int${n.lo ? `_{${toTex(n.lo)}}` : ''}${n.hi ? `^{${toTex(n.hi)}}` : ''} ${toTex(n.body, 1)}\\,d${n.vtex}`, 1.5);
+    case 'lim': return wrap(`\\lim_{${n.vtex} \\to ${toTex(n.to)}${n.dir > 0 ? '^+' : n.dir < 0 ? '^-' : ''}} ${toTex(n.body, 2)}`, 1.5);
     case 'deriv': return n.order === 1 ? `\\frac{d${n.ofTex}}{d${n.wrt}}` : `\\frac{d^{${n.order}}${n.ofTex}}{d${n.wrt}^{${n.order}}}`;
     case 'alt': return n.a.length === 2 ? `\\pm` : n.a.map(x => toTex(x)).join(', ');
     case 'interval': return `\\left[${toTex(n.lo)}, ${toTex(n.hi)}\\right]`;

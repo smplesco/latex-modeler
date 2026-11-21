@@ -8,6 +8,7 @@ import * as nm from './numeric';
 import { BUILTIN_NAMES } from '../lang/interp';
 import { cmapHex } from '../geom/colormap';
 import { niceTicks } from '../geom/ticks';
+import { integrate, limitOf, seriesSum, identify } from './calculus';
 
 export interface ModelResult { ok: boolean; kind?: string; title?: string; detected?: string; code?: string; warnings: string[]; error?: string }
 
@@ -175,6 +176,17 @@ type Spec =
   | { kind: 'scalar3'; f: Node; vars: string[]; name: string };
 
 function build(main: Node[], cx: Ctx): ModelResult {
+  // integrals, limits and infinite series get their own pages
+  const calc = calculusSpec(main);
+  if (calc) {
+    const texMap = new Map<string, string>(); const free = new Set<string>();
+    for (const st of main) { freeSyms(st).forEach(v => free.add(v)); symTex(st, texMap); }
+    const L = main[0].k === 'rel' ? main[0].terms[0] : null; const d = L && decl(L); if (d && d.name.k === 'sym') free.delete(d.name.n);
+    cx.params = [...free].filter(v => !calc.vars.includes(v)).sort(); cx.ptex = texMap;
+    const C = new Code();
+    const { title, detected } = CALC_GENERATORS[calc.spec.kind](calc.spec, cx, C, texMap);
+    return { ok: true, kind: calc.spec.kind, title, detected, code: C.toString(), warnings: cx.warnings };
+  }
   const all = main.flatMap(s => variants(s));
   const spec = classify(all, cx);
   // parameters = free symbols not used as variables
@@ -345,6 +357,338 @@ function classifyExpr(e: Node, d: { nameTex: string; args: string[] | null; bold
 // ---------------------------------------------------------------- generators
 const P1 = (cx: Ctx) => Object.fromEntries(cx.params.map(p => [p, 1]));
 const symLabel = (v: string, tex: Map<string, string>) => tex.get(v) ?? (v.length > 1 && !v.includes('_') ? '\\' + v : v);
+
+// ---------------------------------------------------------------- calculus: integrals, accumulation, limits, series
+type CalcSpec =
+  | { kind: 'integral'; f: Node; v: string; a: Node; b: Node }
+  | { kind: 'accum'; f: Node; v: string; a: Node; x: string; fname: string; indefinite: boolean }
+  | { kind: 'limit'; f: Node; v: string; to: Node; dir: number }
+  | { kind: 'series'; f: Node; i: string; n0: Node; x: string | null };
+const isInfNum = (n: Node) => n.k === 'num' && !isFinite(n.v);
+const isCalc = (n: Node) => n.k === 'int' || n.k === 'lim' || (n.k === 'sum' && !n.prod && isInfNum(n.hi));
+/** recognise an integral / limit / infinite series statement (possibly named: F(x) = \int_0^x …) */
+function calculusSpec(main: Node[]): { spec: CalcSpec; vars: string[] } | null {
+  if (main.length !== 1) return null;
+  const s = main[0]; let target: Node | null = null, fname: string | null = null;
+  if (isCalc(s)) target = s;
+  else if (s.k === 'rel' && s.ops.length === 1 && s.ops[0] === '=') {
+    const [L, R] = s.terms;
+    if (isCalc(R)) { target = R; const d = decl(L); if (d) fname = (d.name as any).tex + (d.args ? `(${d.args.join(', ')})` : ''); }
+    else if (isCalc(L)) target = L;
+  }
+  if (!target) return null;
+  if (target.k === 'int') {
+    const t = target;
+    if (!t.lo || !t.hi) return { spec: { kind: 'accum', f: simplify(t.body), v: t.v, a: N(0), x: t.v, fname: 'F(' + t.v + ')', indefinite: true }, vars: [t.v] };
+    const free = [...freeSyms(t.hi)].filter(v => v !== t.v);
+    if (free.length === 1 && !freeSyms(t.lo).size) return { spec: { kind: 'accum', f: simplify(t.body), v: t.v, a: t.lo, x: free[0], fname: fname ?? `F(${free[0]})`, indefinite: false }, vars: [free[0]] };
+    if (freeSyms(t.lo).size || freeSyms(t.hi).size) throw new MathError('the limits of integration must be numbers (or a single variable in the upper limit, like \\int_0^x)');
+    return { spec: { kind: 'integral', f: simplify(t.body), v: t.v, a: t.lo, b: t.hi }, vars: [] };
+  }
+  if (target.k === 'lim') {
+    if (freeSyms(target.to).size) throw new MathError('the limit point must be a number or \\infty');
+    return { spec: { kind: 'limit', f: simplify(target.body), v: target.v, to: target.to, dir: target.dir }, vars: [] };
+  }
+  const t = target as Extract<Node, { k: 'sum' }>;
+  if (freeSyms(t.lo).size) throw new MathError('the series must start at a number, like \\sum_{n=1}^{\\infty}');
+  const others = [...freeSyms(t.body)].filter(v => v !== t.i);
+  const x = others.includes('x') ? 'x' : others.length === 1 ? others[0] : null;
+  return { spec: { kind: 'series', f: simplify(t.body), i: t.i, n0: t.lo, x }, vars: x ? [x] : [] };
+}
+const evalNum = (n: Node, cx: Ctx) => { if (isInfNum(n)) return (n as any).v as number; const v = compile(n, [], P1(cx))(); if (Number.isNaN(v)) throw new MathError('could not evaluate ' + toTex(n)); return v; };
+/** '= exact' when a closed form is recognised, otherwise '≈ decimal' */
+const shownEq = (v: number, tol: number) => { const id = identify(v, tol); return id ? '= ' + id : '\\approx ' + prettyNum(v, false).replace(/^\\approx\s*/, ''); };
+/** f(var) code for the page; the integrand's own variable name is kept */
+function calcHeader(C: Code, cx: Ctx, title: string, detected: string, dur: number) { header(C, cx, title, detected, dur); }
+
+const CALC_GENERATORS: Record<string, any> = {
+  // ------------------------------------------------------------ ∫_a^b f(x) dx
+  integral(s: Extract<CalcSpec, { kind: 'integral' }>, cx: Ctx, C: Code, tex: Map<string, string>) {
+    const v = s.v, V_ = namer(v), vl = symLabel(v, tex);
+    const f = compile(s.f, [v], P1(cx));
+    const a = evalNum(s.a, cx), b = evalNum(s.b, cx);
+    const lo = Math.min(a, b), hi = Math.max(a, b), finite = isFinite(lo) && isFinite(hi);
+    const res = integrate(f, a, b);
+    // view: the interval plus a margin; for infinite limits, out to where the integrand has faded
+    let x0: number, x1: number;
+    if (finite) { const pad = (hi - lo) * 0.15 || 1; [x0, x1] = [lo - pad, hi + pad]; }
+    else {
+      const ref = isFinite(lo) ? lo : isFinite(hi) ? hi : 0; let W = 1;
+      const peak = Math.max(1e-12, ...Array.from({ length: 200 }, (_, i) => Math.abs(f(ref + (i - 100) * 0.05))).filter(isFinite));
+      for (W = 1; W < 40; W *= 1.25) { const e = Math.max(Math.abs(f(ref + W)) || 0, Math.abs(f(ref - W)) || 0); if (e < peak * 0.01) break; }
+      x0 = isFinite(lo) ? lo - W * 0.15 : ref - W; x1 = isFinite(hi) ? hi + W * 0.15 : ref + W;
+    }
+    if (cx.domains[v]) [x0, x1] = cx.domains[v];
+    const ys: number[] = []; for (let i = 0; i <= 800; i++) ys.push(f(x0 + (x1 - x0) * i / 800));
+    if (!ys.some(isFinite)) throw new MathError('the integrand has no real values here');
+    let [ya, yb] = nm.robustRange(ys); ya = Math.min(ya, 0); yb = Math.max(yb, 0);
+    const [y0, y1] = nm.niceRange(ya, yb, 0.1);
+    const trig = hasFn(s.f, TRIG, v) && (x1 - x0) >= Math.PI;
+    const valTex = res.diverges ? '' : shownEq(res.v, Math.max(1e-11 * Math.max(1, Math.abs(res.v)), res.err * 10));
+    const intTex = `\\int_{${toTex(s.a)}}^{${toTex(s.b)}} ${texOf(s.f)}\\,d${vl}`;
+    const title = res.diverges ? 'Integral (diverges)' : finite ? 'Definite integral' : 'Improper integral';
+    const detected = finite ? 'definite integral: area under the curve' : 'improper integral over an infinite interval';
+    header(C, cx, title, detected, 7);
+    C.sec('the integrand and the interval');
+    C.l(`f(${V_}) = ${code(s.f)}`);
+    C.l(`A = ${nf(a)}`).l(`B = ${nf(b)}`).l(`X0 = ${nf(x0)}`).l(`X1 = ${nf(x1)}`).l(`Y0 = ${nf(y0)}`).l(`Y1 = ${nf(y1)}`);
+    if (!res.diverges) C.l(`I = ${nf(res.v)}   // value of the integral (computed numerically when the page was made)`);
+    C.sec('figure: the signed area (blue above the axis, red below)');
+    C.l(`Fr = frame2d((30, 134), (150, 110), (X0, X1), (Y0, Y1), {xlabel: ${q(vl)}, ylabel: "y"${trig ? ', piTicks: true' : ''}})`);
+    C.l('NA = 240').l('xa = max(min(A, B), X0)').l('xb = min(max(A, B), X1)');
+    C.l('yc(u) = isnan(f(u)) ? 0 : clamp(f(u), Y0, Y1)');
+    C.l('edge(k, part) = k == 0 ? Fr.map((xa, 0)) : (k == NA + 2 ? Fr.map((xb, 0)) : Fr.map((xa + (xb - xa) * (k - 1) / NA, part(yc(xa + (xb - xa) * (k - 1) / NA)))))');
+    C.l(`poly(map(range(0, NA + 3), k => edge(k, u => max(u, 0))), {fill: "${BLUE}", opacity: 0.2})`);
+    C.l(`poly(map(range(0, NA + 3), k => edge(k, u => min(u, 0))), {fill: "${RED}", opacity: 0.2})`);
+    C.l(`fplot(Fr, f, {width: 0.5, color: "${BLUE}"})`);
+    C.l('for e in [A, B] { if abs(e) < 1e300 && e >= X0 && e <= X1 {');
+    C.l('  line(Fr.map((e, Y0)), Fr.map((e, Y1)), {dash: 1, width: 0.2, color: "#888"})');
+    C.l('} }');
+    if (finite) {
+      C.sec('midpoint Riemann sums: the rectangles double every second (press play)');
+      C.l('n = 2 ^ min(7, 1 + floor(t))').l('h = (B - A) / n');
+      C.l('for k in 0..n {');
+      C.l('  xm = A + (k + 0.5) * h');
+      C.l('  ym = yc(xm)');
+      C.l(`  poly(Fr.map((A + k * h, 0)), Fr.map((A + (k + 1) * h, 0)), Fr.map((A + (k + 1) * h, ym)), Fr.map((A + k * h, ym)), {fill: ym >= 0 ? "${ORANGE}" : "${RED}", opacity: 0.32, stroke: "#b8741a"})`);
+      C.l('}');
+      C.l('M = h * sum(map(range(0, n), k => f(A + (k + 0.5) * h)))');
+      C.l(res.diverges
+        ? 'tex("n = " + str(n) + ",\\quad M_n = " + fmt(M, 5), (105, 127), {size: 10, color: "#b8741a"})'
+        : 'tex("n = " + str(n) + ",\\quad M_n = " + fmt(M, 6) + ",\\quad M_n - I = " + fmt(M - I, 6), (105, 127), {size: 10, color: "#b8741a"})');
+    }
+    const left: Fact[] = [], right: Fact[] = [];
+    if (res.diverges) left.push({ head: 'Value', eqs: [intTex, T('diverges: the area is infinite')] });
+    else {
+      left.push({ head: 'Value', eqs: [`${intTex} ${valTex}`, ...(identify(res.v, Math.max(1e-11 * Math.max(1, Math.abs(res.v)), res.err * 10)) && !Number.isInteger(res.v) ? [`\\approx ${+res.v.toPrecision(8)}`] : [])] });
+      if (finite && hi > lo) {
+        const avg = res.v / (b - a);
+        left.push({ head: 'Average value', eqs: [`\\frac{1}{${toTex(s.b)} - ${toTex(s.a)}}\\int f\\,d${vl} ${prettyEq(avg)}`] });
+        const pos = integrate(u => Math.max(0, f(u)), lo, hi).v, negA = integrate(u => Math.min(0, f(u)), lo, hi).v;
+        if (pos > 1e-9 && negA < -1e-9) left.push({ head: 'Signed areas', eqs: [`${T('above: ')} ${prettyNum(pos, false)},\\; ${T('below: ')} ${prettyNum(negA, false)}`] });
+      }
+    }
+    if (finite) {
+      const mid = (n: number) => { const h = (b - a) / n; let sm = 0; for (let k = 0; k < n; k++) sm += f(a + (k + 0.5) * h); return sm * h; };
+      right.push({ head: 'Midpoint sums', eqs: [4, 16, 64].map(n => `M_{${n}} ${prettyEq(mid(n))}`) });
+      if (!res.diverges) right.push({ head: 'Midpoint error', eqs: [T('shrinks to ¼ each time n doubles:'), `|M_n - I| \\le \\frac{(b-a)\\,h^2}{24} \\max|f''|`] });
+    } else right.push({ head: 'Improper integral', eqs: [T(isFinite(lo) || isFinite(hi) ? 'one limit is infinite:' : 'both limits are infinite:'), `\\lim_{R \\to \\infty} \\int^{R} f\\,d${vl}`] });
+    factsBlock(C, cx, left, right);
+    return { title, detected };
+  },
+
+  // ------------------------------------------------------------ F(x) = ∫_a^x f(t) dt   (and indefinite ∫ f dx)
+  accum(s: Extract<CalcSpec, { kind: 'accum' }>, cx: Ctx, C: Code, tex: Map<string, string>) {
+    const v = s.v, x = s.x, V_ = namer(v), X_ = namer(x), vl = symLabel(v, tex), xl = symLabel(x, tex);
+    const f = compile(s.f, [v], P1(cx));
+    const a = evalNum(s.a, cx);
+    const trig = hasFn(s.f, TRIG, v);
+    let [x0, x1] = cx.domains[x] ?? defaultXRange([f], trig);
+    if (a < x0) x0 = a - (x1 - x0) * 0.1; if (a > x1) x1 = a + (x1 - x0) * 0.1;
+    const fy: number[] = [], Fy: number[] = [];
+    for (let i = 0; i <= 160; i++) { const u = x0 + (x1 - x0) * i / 160; fy.push(f(u)); const r = integrate(f, a, u); Fy.push(r.diverges ? NaN : r.v); }
+    if (!fy.some(isFinite)) throw new MathError('the integrand has no real values here');
+    let [fa, fb] = nm.robustRange(fy); fa = Math.min(fa, 0); fb = Math.max(fb, 0);
+    let [Fa, Fb] = Fy.some(isFinite) ? nm.robustRange(Fy, 0, 1) : [-1, 1]; Fa = Math.min(Fa, 0); Fb = Math.max(Fb, 0);
+    const [y0, y1] = nm.niceRange(fa, fb, 0.1), [Y0, Y1] = nm.niceRange(Fa, Fb, 0.1);
+    const piT = trig && (x1 - x0) >= Math.PI;
+    const Fname = s.indefinite ? 'F' : (s.fname.replace(/\(.*/, '') || 'F');
+    const title = s.indefinite ? 'Indefinite integral' : 'Accumulation function';
+    const detected = s.indefinite ? 'antiderivative, drawn as the area from 0' : `area under f from ${prettyNum(a, false)} up to ${x}`;
+    header(C, cx, title, detected, 8);
+    C.sec('the integrand and its running area');
+    C.l(`f(${V_}) = ${code(s.f)}`);
+    C.l(`A = ${nf(a)}`).l(`X0 = ${nf(x0)}`).l(`X1 = ${nf(x1)}`);
+    C.l('// area from A to u by Simpson\'s rule (n even)');
+    C.l('simpson(g, p, r, n) = (r - p) / (3 * n) * sum(map(range(0, n + 1), k => g(p + (r - p) * k / n) * (k == 0 || k == n ? 1 : (k % 2 == 1 ? 4 : 2))))');
+    C.l(`${Fname}(${X_}) = simpson(f, A, ${X_}, 60)`);
+    C.sec('left: the area builds up as the edge sweeps along (press play)');
+    C.l(`P = frame2d((22, 150), (76, 92), (X0, X1), (${nf(y0)}, ${nf(y1)}), {xlabel: ${q(vl)}, ylabel: "f"${piT ? ', piTicks: true' : ''}})`);
+    C.l(`Q = frame2d((114, 150), (76, 92), (X0, X1), (${nf(Y0)}, ${nf(Y1)}), {xlabel: ${q(xl)}, ylabel: ${q(Fname)}${piT ? ', piTicks: true' : ''}})`);
+    C.l('xe = X0 + (X1 - X0) * (0.03 + 0.94 * t / 8)');
+    C.l('NA = 160');
+    C.l(`yc(u) = isnan(f(u)) ? 0 : clamp(f(u), ${nf(y0)}, ${nf(y1)})`);
+    C.l('lo = min(A, xe)').l('hi = max(A, xe)');
+    C.l('edge(k, part) = k == 0 ? P.map((lo, 0)) : (k == NA + 2 ? P.map((hi, 0)) : P.map((lo + (hi - lo) * (k - 1) / NA, part(yc(lo + (hi - lo) * (k - 1) / NA)))))');
+    C.l(`poly(map(range(0, NA + 3), k => edge(k, u => max(u, 0))), {fill: "${BLUE}", opacity: 0.22})`);
+    C.l(`poly(map(range(0, NA + 3), k => edge(k, u => min(u, 0))), {fill: "${RED}", opacity: 0.22})`);
+    C.l(`fplot(P, f, {width: 0.5, color: "${BLUE}"})`);
+    C.l(`line(P.map((xe, ${nf(y0)})), P.map((xe, ${nf(y1)})), {color: "${GREEN}", width: 0.3})`);
+    C.l(`tex(${q(`${vl} = `)} + fmt(xe, 2), P.map((xe, ${nf(y1)})) + (0, 2), {size: 8, color: "${GREEN}", anchor: "s"})`);
+    C.sec('right: the running area is a function of the upper limit');
+    C.l(`fplot(Q, ${Fname}, {width: 0.5, color: "${GREEN}", n: 140})`);
+    C.l(`Fe = ${Fname}(xe)`);
+    C.l(`if isnan(Fe) == 0 && Fe >= ${nf(Y0)} && Fe <= ${nf(Y1)} {`);
+    C.l('  P0 = Q.map((xe, Fe))').l('  dir = normalize(Q.map((xe + 1, Fe + f(xe))) - P0)');
+    C.l(`  line(P0 - dir * 10, P0 + dir * 10, {color: "${RED}", width: 0.3})`);
+    C.l(`  dot(P0, {r: 0.8, color: "${GREEN}"})`);
+    C.l(`  tex(${q(`${Fname}(`)} + fmt(xe, 2) + ") = " + fmt(Fe, 3) + ${q(`,\\; ${Fname}' = f = `)} + fmt(f(xe), 3), (152, 145), {size: 8, color: "#555"})`);
+    C.l('}');
+    C.l(`tex("\\text{the slope of } ${Fname} \\text{ is the height of } f", (60, 145), {size: 8, color: "#555"})`);
+    const intTex = s.indefinite ? `\\int ${texOf(s.f)}\\,d${vl} = ${Fname}(${vl}) + C` : `${s.fname} = \\int_{${toTex(s.a)}}^{${xl}} ${texOf(s.f)}\\,d${vl}`;
+    const left: Fact[] = [{ head: s.indefinite ? 'Antiderivative' : 'Definition', eqs: [intTex, ...(s.indefinite ? [`${T('shown with ')} ${Fname}(${vl}) = \\int_0^{${vl}} ${texOf(s.f)}\\,d${vl}`] : [])] },
+      { head: 'Fundamental theorem', eqs: [`${Fname}'(${xl}) = f(${xl})`, `${Fname}(${prettyNum(a, false)}) = 0`] }];
+    const samples = [x0 + (x1 - x0) * 0.25, x0 + (x1 - x0) * 0.5, x0 + (x1 - x0) * 0.75, x1].map(u => +u.toPrecision(3));
+    const right: Fact[] = [{ head: 'Values', eqs: samples.map(u => { const r = integrate(f, a, u); return `${Fname}(${prettyNum(u, false)}) ${r.diverges ? '= \\infty' : prettyEq(r.v)}`; }) }];
+    factsBlock(C, cx, left, right);
+    return { title, detected };
+  },
+
+  // ------------------------------------------------------------ lim_{x→a} f(x)
+  limit(s: Extract<CalcSpec, { kind: 'limit' }>, cx: Ctx, C: Code, tex: Map<string, string>) {
+    const v = s.v, V_ = namer(v), vl = symLabel(v, tex);
+    const f = compile(s.f, [v], P1(cx));
+    const a = evalNum(s.to, cx);
+    const seq = !isFinite(a) && ['n', 'k', 'm', 'N'].includes(v);
+    const res = limitOf(f, a, s.dir, seq);
+    const L = res.kind === 'value' ? res.v : NaN;
+    const limTex = `\\lim_{${vl} \\to ${toTex(s.to)}${s.dir > 0 ? '^+' : s.dir < 0 ? '^-' : ''}} ${texOf(s.f)}`;
+    const verdict = res.kind === 'value' ? shownEq(L, 1e-6 * Math.max(1, Math.abs(L))) : res.kind === 'inf' ? `= ${res.sign > 0 ? '' : '-'}\\infty` : '';
+    // window
+    let x0: number, x1: number;
+    if (isFinite(a)) { const w = cx.domains[v] ? 0 : 1.5; [x0, x1] = cx.domains[v] ?? [a - (s.dir > 0 ? 0.2 : w), a + (s.dir < 0 ? 0.2 : w)]; }
+    else [x0, x1] = cx.domains[v] ?? (seq ? [0, 40] : a > 0 ? [0, 30] : [-30, 0]);
+    const ys: number[] = []; for (let i = 0; i <= 600; i++) { const u = x0 + (x1 - x0) * i / 600; if (Math.abs(u - a) > 1e-9) ys.push(seq ? f(Math.max(1, Math.round(u))) : f(u)); }
+    if (isFinite(L)) ys.push(L);
+    let [ya, yb] = nm.robustRange(ys.filter(isFinite), 0.04, 0.96);
+    if (res.kind === 'inf') { const sp = yb - ya || 1; if (res.sign > 0) yb = Math.max(yb, ya + sp); else ya = Math.min(ya, yb - sp); }
+    const [y0, y1] = nm.niceRange(ya, yb, 0.12);
+    const title = 'Limit';
+    const detected = isFinite(a) ? (s.dir ? 'one-sided limit' : 'limit at a point') : seq ? 'limit of a sequence' : 'limit at infinity';
+    header(C, cx, title, detected, 6);
+    C.sec('the function and the point it approaches');
+    C.l(`f(${V_}) = ${code(s.f)}`);
+    C.l(`X0 = ${nf(x0)}`).l(`X1 = ${nf(x1)}`).l(`Y0 = ${nf(y0)}`).l(`Y1 = ${nf(y1)}`);
+    if (isFinite(a)) C.l(`a = ${nf(a)}`);
+    if (isFinite(L)) C.l(`L = ${nf(L)}   // the limit (estimated numerically when the page was made)`);
+    C.sec('figure');
+    C.l(`Fr = frame2d((30, 134), (150, 110), (X0, X1), (Y0, Y1), {xlabel: ${q(vl)}, ylabel: "y"})`);
+    if (seq) {
+      C.l(`for k in 1..floor(X1) + 1 { y = f(k)\n  if isnan(y) == 0 && y >= Y0 && y <= Y1 { dot(Fr.map((k, y)), {r: 0.55, color: "${BLUE}"}) } }`);
+    } else C.l(`fplot(Fr, f, {width: 0.5, color: "${BLUE}", n: 1500})`);
+    if (isFinite(L) && L >= y0 && L <= y1) C.l(`line(Fr.map((X0, L)), Fr.map((X1, L)), {dash: 1.2, width: 0.25, color: "${GREEN}"})`).l(`tex("L", Fr.map((X0, L)) + (-2, 1.6), {size: 9, color: "${GREEN}", anchor: "e"})`);
+    C.sec('points close in on the limit (press play)');
+    if (isFinite(a)) {
+      C.l('d = (X1 - X0) * 0.45 * 0.5 ^ (t * 1.8)');
+      C.l(`line(Fr.map((a, Y0)), Fr.map((a, Y1)), {dash: 1, width: 0.2, color: "#999"})`);
+      const sides = s.dir > 0 ? [1] : s.dir < 0 ? [-1] : [-1, 1];
+      for (const sd of sides) {
+        C.l(`u${sd > 0 ? 'r' : 'l'} = a ${sd > 0 ? '+' : '-'} d`).l(`y${sd > 0 ? 'r' : 'l'} = f(u${sd > 0 ? 'r' : 'l'})`);
+        C.l(`if isnan(y${sd > 0 ? 'r' : 'l'}) == 0 && y${sd > 0 ? 'r' : 'l'} >= Y0 && y${sd > 0 ? 'r' : 'l'} <= Y1 { dot(Fr.map((u${sd > 0 ? 'r' : 'l'}, y${sd > 0 ? 'r' : 'l'})), {r: 0.9, color: "${sd > 0 ? RED : ORANGE}"}) }`);
+      }
+      if (isFinite(L) && L >= y0 && L <= y1) C.l(`circle(Fr.map((a, L)), 0.9, {stroke: "${BLUE}", fill: "#ffffff", width: 0.3})`);
+      C.l(`tex(${q(`${vl} = a \\pm `)} + fmt(d, 5) + ${q(`:\\quad f = `)} + fmt(f(a + d), 6)${s.dir === 0 ? ` + ", \\;" + fmt(f(a - d), 6)` : ''}, (105, 127), {size: 9.5, color: "#555"})`);
+    } else {
+      C.l(`u = X0 + (X1 - X0) * (0.05 + 0.93 * t / 6)`).l(`y = f(${seq ? 'max(1, round(u))' : 'u'})`);
+      C.l(`if isnan(y) == 0 && y >= Y0 && y <= Y1 { dot(Fr.map((${seq ? 'max(1, round(u))' : 'u'}, y)), {r: 0.95, color: "${RED}"}) }`);
+      C.l(`tex(${q(`${vl} = `)} + fmt(${seq ? 'max(1, round(u))' : 'u'}, ${seq ? 0 : 2}) + ${q(`:\\quad f = `)} + fmt(y, 6), (105, 127), {size: 9.5, color: "#555"})`);
+    }
+    // values table (generation time)
+    const table: string[] = [];
+    if (isFinite(a)) {
+      for (const k of [1, 2, 3, 4]) {
+        const h = 10 ** -k;
+        const parts: string[] = [];
+        if (s.dir <= 0) parts.push(`f(a-${prettyNum(h, false)}) ${prettyEq(f(a - h))}`);
+        if (s.dir >= 0) parts.push(`f(a+${prettyNum(h, false)}) ${prettyEq(f(a + h))}`);
+        table.push(parts.join(',\\; '));
+      }
+    } else for (const k of [1, 2, 4, 6]) { const u = (a > 0 ? 1 : -1) * 10 ** k; table.push(`f(${a > 0 ? '' : '-'}10^{${k}}) ${prettyEq(f(u))}`); }
+    const left: Fact[] = [{ head: 'Result', eqs: res.kind === 'none' ? [limTex, T(`does not exist: ${res.why}`), ...(res.left !== undefined && res.right !== undefined ? [`${T('left: ')} ${prettyNum(res.left, false)},\\; ${T('right: ')} ${prettyNum(res.right, false)}`] : [])] : [`${limTex} ${verdict}`] }];
+    if (isFinite(a) && !s.dir) { const fa = f(a); left.push({ head: 'At the point itself', eqs: [isFinite(fa) ? `f(${prettyNum(a, false)}) ${prettyEq(fa)}` : T('f is undefined there — the limit only looks nearby')] }); }
+    const right: Fact[] = [{ head: 'Values approaching', eqs: table }];
+    factsBlock(C, cx, left, right);
+    return { title, detected };
+  },
+
+  // ------------------------------------------------------------ Σ_{n=n0}^∞ a_n   (numbers or a power series in x)
+  series(s: Extract<CalcSpec, { kind: 'series' }>, cx: Ctx, C: Code, tex: Map<string, string>) {
+    const i = s.i, I_ = namer(i), il = symLabel(i, tex);
+    const n0 = Math.round(evalNum(s.n0, cx));
+    const sumTex = `\\sum_{${il}=${n0}}^{\\infty} ${texOf(s.f)}`;
+    if (!s.x) {
+      const a = compile(s.f, [i], P1(cx));
+      const res = seriesSum(a, n0);
+      const L = res.kind === 'converges' ? res.v : NaN;
+      const NM = 40;
+      const Sp: number[] = []; let acc = 0; for (let k = 0; k <= NM; k++) { acc += a(n0 + k); Sp.push(acc); }
+      const vals = [...Sp, ...Array.from({ length: NM + 1 }, (_, k) => a(n0 + k))]; if (isFinite(L)) vals.push(L);
+      let [ya, yb] = nm.robustRange(vals.filter(isFinite), 0, 1); ya = Math.min(ya, 0); yb = Math.max(yb, 0);
+      const [y0, y1] = nm.niceRange(ya, yb, 0.1);
+      const title = res.kind === 'converges' ? 'Infinite series' : 'Infinite series (diverges)';
+      const detected = 'infinite series: partial sums';
+      header(C, cx, title, detected, 8);
+      C.sec('the terms and the partial sums');
+      C.l(`term(${I_}) = ${code(s.f)}`).l(`N0 = ${n0}`).l(`NM = ${NM}`);
+      C.l('S(k) = sum(map(range(N0, N0 + k + 1), term))   // partial sum of the first k + 1 terms');
+      if (isFinite(L)) C.l(`L = ${nf(L)}   // the sum (estimated numerically when the page was made)`);
+      C.sec('figure: grey bars are the terms, dots are the partial sums (press play)');
+      C.l(`Fr = frame2d((30, 134), (150, 110), (0, NM), (${nf(y0)}, ${nf(y1)}), {xlabel: "k", ylabel: "S_k"})`);
+      C.l('shown = min(NM, floor(1 + t / 8 * NM))');
+      C.l('for k in 0..shown + 1 {');
+      C.l(`  ak = clamp(term(N0 + k), ${nf(y0)}, ${nf(y1)})`);
+      C.l('  if isnan(ak) == 0 { line(Fr.map((k, 0)), Fr.map((k, ak)), {width: 0.9, color: "#c3c9d1"}) }');
+      C.l(`  sk = S(k)`);
+      C.l(`  if isnan(sk) == 0 && sk >= ${nf(y0)} && sk <= ${nf(y1)} { dot(Fr.map((k, sk)), {r: 0.6, color: "${BLUE}"}) }`);
+      C.l('}');
+      if (isFinite(L) && L >= y0 && L <= y1) C.l(`line(Fr.map((0, L)), Fr.map((NM, L)), {dash: 1.2, width: 0.25, color: "${GREEN}"})`).l(`tex("L", Fr.map((0, L)) + (-2, 1.6), {size: 9, color: "${GREEN}", anchor: "e"})`);
+      C.l(`tex("S_{" + str(shown) + "} = " + fmt(S(shown), 6)${isFinite(L) ? ' + ",\\quad L - S = " + fmt(L - S(shown), 6)' : ''}, (105, 127), {size: 9.5, color: "#555"})`);
+      const big = (n: number) => { let sm = 0; for (let k = n0; k < n0 + n; k++) sm += a(k); return sm; };
+      const r1 = Math.abs(a(n0 + 1001) / a(n0 + 1000));
+      const left: Fact[] = [{ head: 'Verdict', eqs: res.kind === 'converges' ? [`${sumTex} ${shownEq(L, Math.max(1e-11 * Math.max(1, Math.abs(L)), res.err * 3))}`, ...(identify(L, Math.max(1e-11 * Math.max(1, Math.abs(L)), res.err * 3)) && !Number.isInteger(L) ? [`\\approx ${+L.toPrecision(8)}`] : [])] : [sumTex, T('diverges: ' + res.why)] }];
+      left.push({ head: 'Ratio test', eqs: [isFinite(r1) ? `\\left|\\frac{a_{n+1}}{a_n}\\right| \\to ${prettyNum(+r1.toPrecision(3), false)}${r1 < 0.999 ? T(' < 1, converges') : Math.abs(r1 - 1) < 0.01 ? T(' = 1: inconclusive') : T(' > 1, diverges')}` : T('not applicable')] });
+      const right: Fact[] = [{ head: 'Partial sums', eqs: [10, 100, 1000].map(n => `S_{${n}} ${prettyEq(big(n))}`) }];
+      factsBlock(C, cx, left, right);
+      return { title, detected };
+    }
+    // power series in x
+    const x = s.x, X_ = namer(x), xl = symLabel(x, tex);
+    const g = compile(s.f, [x, i], P1(cx));
+    // ratio test on the terms at x = 1: |a_{n+1}/a_n| → 1/R. Terms like 1/n! underflow early, so use the largest n that works,
+    // and call R infinite when the ratio keeps falling towards 0.
+    const ratio = (n: number) => { const r = Math.abs(g(1, n0 + n + 1) / g(1, n0 + n)); return isFinite(r) && r > 0 ? r : NaN; };
+    const qs = [10, 20, 40, 80, 160, 320].map(ratio);
+    const okq = qs.filter(isFinite);
+    let R = NaN;
+    if (okq.length >= 3) {
+      const [qa, qb, qc] = okq.slice(-3);
+      // q(n) ≈ q∞ + c/n: extrapolate from n and 2n
+      const qinf = Math.max(1e-12, 2 * qc - qb);
+      R = qc < qb * 0.7 && qb < qa * 0.7 ? Infinity : 1 / qinf;
+      if (isFinite(R) && Math.abs(R - Math.round(R)) < 2e-3 * Math.max(1, R)) R = Math.round(R);
+    }
+    let [x0, x1] = cx.domains[x] ?? (isFinite(R) ? [-Math.min(1.3 * R, 10), Math.min(1.3 * R, 10)] : [-4, 4]);
+    const MT = 60;
+    const lim = (u: number) => { let sm = 0, last = 0; for (let k = n0; k <= n0 + MT; k++) { last = g(u, k); sm += last; } return Math.abs(last) < 1e-6 * Math.max(1, Math.abs(sm)) ? sm : NaN; };
+    const ys: number[] = []; for (let k = 0; k <= 200; k++) ys.push(lim(x0 + (x1 - x0) * k / 200));
+    if (!ys.some(isFinite)) throw new MathError('the series does not converge anywhere in view');
+    const [ya, yb] = nm.robustRange(ys.filter(isFinite), 0, 1);
+    const [y0, y1] = nm.niceRange(Math.min(ya, 0), Math.max(yb, 0), 0.15);
+    const title = 'Power series';
+    const detected = 'power series: partial sums closing in on the function';
+    header(C, cx, title, detected, 8);
+    C.sec('the terms, the partial sums and the limit');
+    C.l(`term(${X_}, ${I_}) = ${code(s.f)}`).l(`N0 = ${n0}`);
+    C.l(`S(N, ${X_}) = sum(map(range(N0, N0 + N + 1), k => term(${X_}, k)))`);
+    C.l(`lim(${X_}) = abs(term(${X_}, N0 + ${MT})) < 1e-6 * max(1, abs(S(${MT}, ${X_}))) ? S(${MT}, ${X_}) : nan   // where the series has converged`);
+    C.sec('figure: the partial sum grows one term per second (press play)');
+    C.l(`Fr = frame2d((30, 134), (150, 110), (${nf(x0)}, ${nf(x1)}), (${nf(y0)}, ${nf(y1)}), {xlabel: ${q(xl)}, ylabel: "y"})`);
+    C.l(`fplot(Fr, lim, {width: 1.1, color: "#c9d6e6", n: 300})`);
+    C.l('Nt = floor(t)');
+    C.l('for k in 0..Nt {');
+    C.l(`  fplot(Fr, u => S(k, u), {width: 0.25, color: "#9fb4cc", n: 200})`);
+    C.l('}');
+    C.l(`fplot(Fr, u => S(Nt, u), {width: 0.55, color: "${RED}", n: 300})`);
+    if (isFinite(R) && R > 0 && R < 1e6) C.l(`for e in [-${nf(R)}, ${nf(R)}] { if e >= ${nf(x0)} && e <= ${nf(x1)} { line(Fr.map((e, ${nf(y0)})), Fr.map((e, ${nf(y1)})), {dash: 1, width: 0.2, color: "#999"}) } }`);
+    C.l(`tex("S_{" + str(Nt) + "}(${xl}) = \\sum_{${il}=" + str(N0) + "}^{" + str(N0 + Nt) + "} \\ldots", (105, 127), {size: 9.5, color: "${RED}"})`);
+    const left: Fact[] = [{ head: 'Series', eqs: [`f(${xl}) = ${sumTex}`] },
+      { head: 'Radius of convergence', eqs: [!Number.isNaN(R) ? (R === Infinity ? `R = \\infty ${T(' (converges for every ')}${xl})` : `R ${prettyEq(R)}`) : T('could not be estimated')] }];
+    const right: Fact[] = [{ head: 'Values (60 terms)', eqs: [0.5, 1, 2].filter(u => isFinite(lim(u))).map(u => `f(${prettyNum(u, false)}) ${prettyEq(lim(u))}`) }];
+    if (!right[0].eqs.length) right[0].eqs.push(T('converges only near the centre'));
+    factsBlock(C, cx, left, right);
+    return { title, detected };
+  },
+};
 
 const GENERATORS: Record<string, any> = {
   // ------------------------------------------------------------ y = f(x)

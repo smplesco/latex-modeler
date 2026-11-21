@@ -28,4 +28,11 @@ export const MODEL_EXAMPLES: { label: string; tex: string }[] = [
   { label: 'piecewise', tex: 'f(x) = \\begin{cases} x^2 & x < 0 \\\\ \\sqrt{x} & x \\ge 0 \\end{cases}' },
   { label: '± semicircles', tex: 'y = \\pm\\sqrt{4 - x^2}' },
   { label: 'quadratic', tex: 'x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}' },
+  { label: 'area under a curve', tex: '\\int_{-1}^{2} x^3 - x\\,dx' },
+  { label: 'Gaussian integral', tex: '\\int_{-\\infty}^{\\infty} e^{-x^2}\\,dx' },
+  { label: 'accumulation function', tex: 'F(x) = \\int_0^x \\cos(t^2)\\,dt' },
+  { label: 'limit: sin x / x', tex: '\\lim_{x \\to 0} \\frac{\\sin x}{x}' },
+  { label: 'limit: e', tex: '\\lim_{n \\to \\infty} \\left(1 + \\frac{1}{n}\\right)^n' },
+  { label: 'Basel series', tex: '\\sum_{n=1}^{\\infty} \\frac{1}{n^2}' },
+  { label: 'power series of eˣ', tex: '\\sum_{n=0}^{\\infty} \\frac{x^n}{n!}' },
 ];
