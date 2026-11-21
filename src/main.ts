@@ -1,0 +1,432 @@
+// LaTeX Modeler — application shell.
+import '@fontsource/inter/400.css';
+import '@fontsource/inter/600.css';
+import '@fontsource/jetbrains-mono/400.css';
+import './styles.css';
+import { runProgram, RunCtx } from './lang/interp';
+import { Viewer } from './render/viewer';
+import { texReady, measureTex, previewSVG } from './render/tex';
+import { exportSVG } from './render/export';
+import { Editor } from './editor/editor';
+import { autoModel, MODEL_EXAMPLES, ModelResult } from './model/generate';
+import { getPlatform, Platform } from './platform';
+import { REFERENCE } from './ui/reference';
+import { Explorer } from './explore/explorer';
+import { FigureChips } from './explore/chips';
+
+import stressSrc from './examples/stress-tensor.bd?raw';
+import helixSrc from './examples/frenet-helix.bd?raw';
+import saddleSrc from './examples/saddle.bd?raw';
+import tourSrc from './examples/plotting-tour.bd?raw';
+
+const EXAMPLES: Record<string, string> = {
+  'stress-tensor.bd': stressSrc, 'plotting-tour.bd': tourSrc, 'frenet-helix.bd': helixSrc, 'saddle.bd': saddleSrc,
+};
+const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
+const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+// ------------------------------------------------------------------ documents
+interface Doc { id: string; name: string; text: string; saved: string; path?: string; example?: boolean }
+const STORE = 'bdraw.session.v2';
+let docs: Doc[] = [], current = '';
+function loadSession() {
+  try { const s = JSON.parse(localStorage.getItem(STORE) || 'null'); if (s && Array.isArray(s.docs)) { docs = s.docs; current = s.current; } } catch { /* ignore */ }
+  for (const [name, text] of Object.entries(EXAMPLES)) if (!docs.some(d => d.example && d.name === name)) docs.push({ id: 'ex:' + name, name, text, saved: text, example: true });
+  docs.sort((a, b) => (a.example === b.example ? 0 : a.example ? -1 : 1));
+  if (!docs.some(d => d.id === current)) current = docs[0].id;
+  try { const h = decodeURIComponent(location.hash.slice(1)); const d = docs.find(x => x.name.replace(/\.bd$/, '') === h); if (d) current = d.id; } catch { /* ignore */ }
+}
+let saveTimer = 0;
+function persist() { clearTimeout(saveTimer); saveTimer = window.setTimeout(() => { try { localStorage.setItem(STORE, JSON.stringify({ docs, current })); } catch { /* ignore */ } }, 300); }
+const doc = () => docs.find(d => d.id === current)!;
+const isDirty = (d: Doc) => (d.example ? d.text !== EXAMPLES[d.name] : d.text !== d.saved);
+
+// ------------------------------------------------------------------ UI objects
+let platform: Platform;
+const editor = new Editor($('editor'));
+const viewer = new Viewer($('gl'));
+// ---- Figure Explorer: open any figure as a live 3D / 2D graph
+const explorer = new Explorer($('viewpane'), {
+  source: () => editor.value,
+  time: () => tCur,
+  measure: measureTex,
+  title: () => doc().name,
+  writeBack: (name, value, line) => {
+    const lines = editor.value.split('\n'); const L = lines[line - 1] ?? '';
+    const m = new RegExp('^(\\s*' + name + '\\s*=\\s*)(-?[0-9.eE+]+)').exec(L);
+    if (!m) { toast(`couldn't find "${name} = …" on line ${line}`); return; }
+    lines[line - 1] = m[1] + String(+value.toPrecision(6)) + L.slice(m[0].length);
+    const pos = editor.ta.selectionStart; editor.value = lines.join('\n'); editor.ta.setSelectionRange(pos, pos);
+    doc().text = editor.value; persist(); updateTabs(); compile(false);
+    toast(`${name} = ${+value.toPrecision(6)} written to line ${line}`);
+  },
+  snapshot: (url, name) => exportImage(url, name),
+});
+const chips = new FigureChips($('gl'), viewer, (i) => explorer.open(i));
+
+function updateTabs() {
+  const tabs = $('tabs'); tabs.innerHTML = '';
+  for (const d of docs) {
+    const el = document.createElement('div');
+    el.className = 'tab' + (d.id === current ? ' act' : '') + (isDirty(d) ? ' modified' : '');
+    el.innerHTML = `<span class="ic">bd</span><span>${esc(d.name)}</span>${d.example ? '<span class="x" title="modified example"><span></span></span>' : '<span class="x" title="Close"><span>×</span></span>'}`;
+    el.onclick = (e) => { if ((e.target as HTMLElement).closest('.x') && !d.example) { closeDoc(d); return; } openDoc(d.id); };
+    tabs.appendChild(el);
+  }
+  const d = doc();
+  $('crumbDir').textContent = d.example ? 'examples' : d.path ? 'file' : 'unsaved';
+  $('crumbName').textContent = d.name;
+  $('crumbPath').textContent = d.path ?? '';
+  $('bRevert').style.display = d.example ? '' : 'none';
+  platform?.setTitle(`${d.name}${isDirty(d) ? ' •' : ''} — LaTeX Modeler`);
+}
+function openDoc(id: string) {
+  current = id; editor.value = doc().text;
+  try { history.replaceState(null, '', '#' + doc().name.replace(/\.bd$/, '').replace(/[^A-Za-z0-9-]/g, '-')); } catch { /* ignore */ }
+  updateTabs(); persist();
+  tCur = 0; firstFit = true; compile(true);
+}
+function addDoc(name: string, text: string, path?: string, saved = text) {
+  let n = name, k = 2; while (docs.some(d => d.name === n && d.path === path)) n = name.replace(/(\.bd)?$/, `-${k++}.bd`);
+  const d: Doc = { id: 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: n, text, saved, path };
+  docs.push(d); openDoc(d.id); return d;
+}
+async function closeDoc(d: Doc) {
+  if (isDirty(d)) {
+    const r = await ask(`Close “${d.name}”?`, 'It has changes that are not saved to a file.', ['Cancel', 'Save', 'Close without saving']);
+    if (r === 'Cancel' || r === null) return;
+    if (r === 'Save' && !(await saveDoc(d))) return;
+  }
+  docs = docs.filter(x => x !== d);
+  if (current === d.id) openDoc(docs[docs.length - 1].id); else { updateTabs(); persist(); }
+}
+async function saveDoc(d = doc(), saveAs = false): Promise<boolean> {
+  try {
+    const r = await platform.saveFile(d.name, d.text, d.example ? undefined : d.path, saveAs || !!d.example);
+    if (!r) return false;
+    if (d.example) { addDoc(r.name, d.text, r.path); d.text = EXAMPLES[d.name]; }
+    else { d.name = r.name; d.path = r.path; d.saved = d.text; }
+    updateTabs(); persist(); toast(platform.kind === 'desktop' ? `saved ${r.path ?? r.name}` : `downloaded ${r.name}`);
+    return true;
+  } catch (e: any) { toast('save failed: ' + (e.message || e)); return false; }
+}
+
+// ------------------------------------------------------------------ modal / toast
+function modal(html: string) { $('mbox').innerHTML = html; $('modal').classList.add('show'); }
+function closeModal() { $('modal').classList.remove('show'); }
+$('modal').onclick = (e) => { if (e.target === $('modal')) closeModal(); };
+function ask(title: string, body: string, buttons: string[]): Promise<string | null> {
+  return new Promise(res => {
+    modal(`<h3>${esc(title)}</h3><p>${esc(body)}</p><div class="row">${buttons.map((b, i) => `<button class="vbtn ${i === buttons.length - 1 ? 'primary' : ''}" data-b="${esc(b)}">${esc(b)}</button>`).join('')}</div>`);
+    $('mbox').querySelectorAll('button').forEach(b => (b.onclick = () => { closeModal(); res((b as HTMLElement).dataset.b!); }));
+  });
+}
+let toastT = 0;
+function toast(msg: string) { const t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastT); toastT = window.setTimeout(() => t.classList.remove('show'), 2600); }
+
+// ------------------------------------------------------------------ panel & status
+let panelTab = 'problems', problems: { sev: 'e' | 'w'; line: number; msg: string }[] = [], output: { line: number; text: string }[] = [];
+document.querySelectorAll<HTMLElement>('.ptab').forEach(el => el.onclick = () => {
+  panelTab = el.dataset.p!; document.querySelectorAll('.ptab').forEach(x => x.classList.toggle('act', x === el));
+  $('panel').classList.remove('collapsed'); renderPanel();
+});
+$('pcoll').onclick = () => { const p = $('panel'); p.classList.toggle('collapsed'); $('pcoll').textContent = p.classList.contains('collapsed') ? '▴' : '▾'; };
+function renderPanel() {
+  const pc = $('pcount'); pc.textContent = String(problems.length); pc.classList.toggle('bad', problems.some(p => p.sev === 'e'));
+  const body = $('pbody');
+  if (panelTab === 'problems') {
+    if (!problems.length) { body.innerHTML = '<div class="ok">✓ No problems — the page compiled cleanly.</div>'; return; }
+    body.innerHTML = problems.map((p, i) => `<div class="prob" data-i="${i}"><span class="sev ${p.sev}">${p.sev === 'e' ? '⨯ error' : '⚠ warning'}</span><span>${esc(p.msg)}</span>${p.line ? `<span class="loc">[Ln ${p.line}]</span>` : ''}</div>`).join('');
+    body.querySelectorAll<HTMLElement>('.prob').forEach(el => el.onclick = () => { const p = problems[+el.dataset.i!]; if (p.line) editor.goTo(p.line); });
+  } else if (panelTab === 'output') {
+    body.innerHTML = output.length ? output.map(o => `<div class="out"><span class="loc" style="color:#777">[${o.line}]</span> ${esc(o.text)}</div>`).join('') : '<div style="color:#777">print(…) output appears here.</div>';
+  } else body.innerHTML = REFERENCE;
+}
+let lastStatus = 'ready', statusT = 0;
+function status(msg: string, bad = false) { lastStatus = msg; $('sMsg').textContent = msg; $('status').classList.toggle('bad', bad); }
+function flashStatus(msg: string) { $('sMsg').textContent = msg; clearTimeout(statusT); statusT = window.setTimeout(() => ($('sMsg').textContent = lastStatus), 2200); }
+
+// ------------------------------------------------------------------ compile + timeline
+let tCur = 0, duration = 6, playing = false, usesT = false, lastCtx: RunCtx | null = null, firstFit = true, followCam = true;
+const slider = $<HTMLInputElement>('slider');
+function compile(force: boolean) {
+  const t0 = performance.now();
+  let ctx: RunCtx;
+  try { ctx = runProgram(editor.value, tCur, { measure: measureTex }); }
+  catch (e: any) {
+    const line = e.line || 0;
+    problems = [{ sev: 'e', line, msg: e.message }, ...modelWarnings.map(m => ({ sev: 'w' as const, line: 0, msg: m }))];
+    editor.setError(line); renderPanel();
+    status(`✗ ${e.message}${line ? ` (line ${line})` : ''}`, true);
+    return false;
+  }
+  editor.setError(0);
+  const warnings: { line: number; msg: string }[] = [];
+  viewer.build(ctx, warnings);
+  chips.update(ctx);
+  if (!playing) viewer.highlight(editorRecs());
+  problems = [...warnings.map(w => ({ sev: 'w' as const, ...w })), ...modelWarnings.map(m => ({ sev: 'w' as const, line: 0, msg: m }))];
+  lastCtx = ctx; usesT = ctx.usesT; output = ctx.out;
+  duration = ctx.duration ?? 6; slider.max = String(duration); if (tCur > duration) tCur = duration;
+  renderPanel();
+  $('sObj').textContent = `${ctx.prims.length} marks`;
+  $('sTime').textContent = `${(performance.now() - t0).toFixed(0)} ms`;
+  status(warnings.length ? `⚠ ${warnings.length} warning${warnings.length > 1 ? 's' : ''}` : '✓ compiled');
+  if (firstFit) { firstFit = false; viewer.place(0, 0, 1); }
+  else if (followCam && ctx.cam && force) applyCam();
+  updateTime();
+  return true;
+}
+function tour() {
+  if (lastCtx?.cam) return lastCtx.cam;
+  const ph = duration > 0 ? tCur / duration : 0;
+  return { yaw: 0.85 * Math.sin(2 * Math.PI * ph), pitch: 0.5 * Math.sin(Math.PI * ph), zoom: 1 + 0.3 * Math.sin(Math.PI * ph) };
+}
+function applyCam() { const c = tour(); viewer.place(c.yaw, c.pitch, c.zoom); }
+function updateTime() { slider.value = String(tCur); $('tval').textContent = `t = ${tCur.toFixed(2)}`; }
+function setTime(t: number) { tCur = Math.max(0, Math.min(duration, t)); updateTime(); if (usesT) compile(false); if (followCam) applyCam(); }
+slider.addEventListener('input', () => setTime(+slider.value));
+function setPlaying(p: boolean) {
+  playing = p;
+  $('playIc').innerHTML = p ? '<path d="M2 1h3v10H2zM7 1h3v10H7z"/>' : '<path d="M2 1l9 5-9 5z"/>';
+  if (p && tCur >= duration - 1e-6) tCur = 0;
+  lastFrame = performance.now();
+}
+$('play').onclick = () => setPlaying(!playing);
+function setFollow(f: boolean) { followCam = f; $('bCam').classList.toggle('on', f); if (f) applyCam(); }
+$('bCam').onclick = () => setFollow(!followCam);
+$('bOrtho').onclick = () => { viewer.setOrtho(!viewer.isOrtho); $('bOrtho').classList.toggle('on', viewer.isOrtho); };
+$('bReset').onclick = () => { setFollow(false); viewer.place(0, 0, 1); };
+let hintHidden = false;
+viewer.onUserCamera = () => { if (followCam) setFollow(false); if (!hintHidden) { hintHidden = true; setTimeout(() => ($('hint').style.opacity = '0'), 1500); } };
+
+// click → jump to source; hover shows what a click would hit
+const tip = $('pickTip'); const glEl = $('gl');
+let downAt: { x: number; y: number; t: number } | null = null, hoverQueued = false, lastMove: PointerEvent | null = null, hoverRec: any = null;
+const canvas = viewer.renderer.domElement;
+canvas.addEventListener('pointerdown', e => { downAt = { x: e.clientX, y: e.clientY, t: performance.now() }; hideTip(); });
+canvas.addEventListener('pointerup', e => {
+  if (!downAt || e.button !== 0) return;
+  const moved = Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y), dt = performance.now() - downAt.t; downAt = null;
+  if (moved > 5 || dt > 600) return;
+  const r = viewer.pickAt(e.clientX, e.clientY);
+  if (!r) { flashStatus('nothing here — click a line, label, dot or surface'); return; }
+  const line = e.altKey ? r.inner : r.line;
+  editor.goTo(line);
+  flashStatus(r.inner !== r.line ? `line ${line} (Alt+click: line ${e.altKey ? r.line : r.inner})` : `line ${line}`);
+});
+function hideTip() { tip.style.opacity = '0'; glEl.classList.remove('picking'); if (hoverRec) { hoverRec = null; viewer.highlight(editorRecs()); } }
+canvas.addEventListener('pointerleave', hideTip);
+canvas.addEventListener('pointermove', e => {
+  if (e.buttons) return;
+  lastMove = e;
+  if (hoverQueued) return; hoverQueued = true;
+  setTimeout(() => {
+    hoverQueued = false; const ev = lastMove!; if (!ev) return;
+    const r = viewer.pickAt(ev.clientX, ev.clientY);
+    if (!r) { hideTip(); return; }
+    const box = glEl.getBoundingClientRect();
+    tip.textContent = r.inner !== r.line ? `Ln ${r.line}  ·  drawn at ${r.inner}` : `Ln ${r.line}`;
+    tip.style.left = (ev.clientX - box.left + 14) + 'px'; tip.style.top = (ev.clientY - box.top + 16) + 'px'; tip.style.opacity = '1';
+    glEl.classList.add('picking');
+    if (r !== hoverRec) { hoverRec = r; viewer.highlight(viewer.picks.filter(p => p.line === r.line && (r.inner === r.line || p.inner === r.inner))); }
+  }, 40);
+});
+// editor cursor → light up what that line draws
+let edLine = 0;
+const editorRecs = () => (document.activeElement === editor.ta && edLine ? viewer.picks.filter(p => p.line === edLine || p.inner === edLine) : []);
+editor.onCursor = (l, c) => {
+  $('sPos').textContent = `Ln ${l}, Col ${c}`;
+  if (l !== edLine) { edLine = l; if (!hoverRec) viewer.highlight(editorRecs()); }
+};
+editor.ta.addEventListener('blur', () => { if (!hoverRec) viewer.highlight([]); });
+editor.ta.addEventListener('focus', () => { if (!hoverRec) viewer.highlight(editorRecs()); });
+
+// editor changes
+let compileTimer = 0;
+editor.onChange = () => {
+  const d = doc(); d.text = editor.value; persist(); updateTabs();
+  clearTimeout(compileTimer); compileTimer = window.setTimeout(() => compile(false), 260);
+};
+editor.onRun = () => compile(true);
+
+// ------------------------------------------------------------------ auto-model bar
+let modelWarnings: string[] = [];
+const mIn = $<HTMLInputElement>('mIn'), mEx = $<HTMLSelectElement>('mEx');
+for (const ex of MODEL_EXAMPLES) { const o = document.createElement('option'); o.value = ex.tex; o.textContent = ex.label; mEx.appendChild(o); }
+let previewTimer = 0, lastModel: { tex: string; r: ModelResult } | null = null;
+function runModel(tex: string) { if (lastModel?.tex === tex) return lastModel.r; const r = autoModel(tex); lastModel = { tex, r }; return r; }
+function preview() {
+  const tex = mIn.value.trim();
+  const box = $('mprev');
+  if (!tex) { box.classList.remove('show'); return; }
+  box.classList.add('show');
+  const { el, err } = previewSVG(tex);
+  const eq = $('mEq'); eq.innerHTML = ''; if (el) eq.appendChild(el);
+  const kind = $('mKind');
+  if (err) { kind.className = 'kind bad'; kind.textContent = 'LaTeX: ' + err; return; }
+  const r = runModel(tex);
+  if (r.ok) { kind.className = 'kind'; kind.innerHTML = `→ <b>${esc(r.title!)}</b> · ${esc(r.detected!)}${r.warnings.length ? ` · ⚠ ${esc(r.warnings[0])}` : ''} — press Enter`; }
+  else { kind.className = 'kind bad'; kind.textContent = '✗ ' + r.error; }
+}
+mIn.addEventListener('input', () => { clearTimeout(previewTimer); previewTimer = window.setTimeout(preview, 280); });
+mIn.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); modelIt(); } });
+mEx.addEventListener('change', () => { if (!mEx.value) return; mIn.value = mEx.value; mEx.value = ''; preview(); modelIt(); });
+$('mGo').onclick = () => modelIt();
+function modelIt() {
+  const tex = mIn.value.trim();
+  if (!tex) { mIn.focus(); toast('type an equation first, or pick one from Examples'); return; }
+  const r = runModel(tex);
+  if (!r.ok) { preview(); toast(r.error!); return; }
+  const slug = (r.title || 'model').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  // reuse an untouched model tab instead of piling up tabs
+  const reuse = docs.find(d => d.id === current && !d.path && !d.example && d.text === d.saved && /^model-/.test(d.name));
+  modelWarnings = r.warnings;
+  if (reuse) { reuse.name = `model-${slug}.bd`; reuse.text = reuse.saved = r.code!; openDoc(reuse.id); }
+  else addDoc(`model-${slug}.bd`, r.code!, undefined, r.code!);
+  followCam = true; $('bCam').classList.add('on');
+  flashStatus(`modelled as: ${r.detected}`);
+  setTimeout(() => { modelWarnings = []; }, 0);
+}
+
+// ------------------------------------------------------------------ files & export
+$('bNew').onclick = () => addDoc('untitled.bd', 'page("A4", "paper")\n\ntex("\\\\textbf{Untitled}", (105, 270), {size: 20})\n', undefined, '');
+$('bOpen').onclick = async () => {
+  try { const f = await platform.openFile(); if (!f) return; const ex = docs.find(d => d.path && d.path === f.path); if (ex) { openDoc(ex.id); return; } addDoc(f.name, f.text, f.path); }
+  catch (e: any) { toast('open failed: ' + (e.message || e)); }
+};
+$('bSave').onclick = (e) => saveDoc(doc(), (e as MouseEvent).shiftKey);
+$('bRevert').onclick = () => { const d = doc(); if (!d.example) return; d.text = EXAMPLES[d.name]; openDoc(d.id); };
+const exportMenu = $('exportMenu');
+$('bExport').onclick = (e) => { if ((e.target as HTMLElement).closest('.menu')) return; exportMenu.classList.toggle('show'); };
+document.addEventListener('click', e => { if (!(e.target as HTMLElement).closest('#bExport')) exportMenu.classList.remove('show'); });
+exportMenu.querySelectorAll<HTMLElement>('div').forEach(el => el.onclick = (e) => { e.stopPropagation(); exportMenu.classList.remove('show'); doExport(el.dataset.x!); });
+const baseName = () => doc().name.replace(/\.bd$/, '');
+async function doExport(kind: string) {
+  if (!lastCtx) { toast('fix the errors first'); return; }
+  if (kind === 'html') { await exportHTML(); return; }
+  if (kind === 'code') { try { await navigator.clipboard.writeText(editor.value); toast('page code copied'); } catch { toast('copy was blocked — select the code and press Ctrl+C'); } return; }
+  let name: string, data: string | Uint8Array, mime: string, previewUrl: string;
+  if (kind === 'svg') {
+    const svg = exportSVG(lastCtx); name = baseName() + '.svg'; data = svg; mime = 'image/svg+xml';
+    previewUrl = URL.createObjectURL(new Blob([svg], { type: mime }));
+  } else {
+    const url = kind === 'png' ? viewer.snapshotPage(200) : viewer.snapshotView();
+    name = baseName() + (kind === 'png' ? '.png' : '-view.png'); mime = 'image/png'; previewUrl = url;
+    const bin = atob(url.split(',')[1]); const u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); data = u8;
+  }
+  if (platform.kind === 'desktop') { try { if (await platform.exportFile(name, data, mime)) toast('exported ' + name); } catch (e: any) { toast('export failed: ' + (e.message || e)); } return; }
+  // web: preview with download + copy (some embedded viewers block downloads)
+  modal(`<h3>${esc(name)}</h3><img src="${previewUrl}" alt="export preview"><div class="row"><span>If the download is blocked here, right-click the image to save it${kind === 'svg' ? ', or copy the SVG code' : ''}.</span>
+    ${kind === 'svg' ? '<button class="vbtn" id="xCopy">Copy SVG code</button>' : '<button class="vbtn" id="xCopy">Copy image</button>'}<button class="vbtn" id="xClose">Close</button><button class="vbtn primary" id="xDl">Download</button></div>`);
+  $('xClose').onclick = closeModal;
+  $('xDl').onclick = () => platform.exportFile(name, data, mime);
+  $('xCopy').onclick = async () => {
+    try {
+      if (kind === 'svg') await navigator.clipboard.writeText(data as string);
+      else await navigator.clipboard.write([new ClipboardItem({ 'image/png': new Blob([data as BlobPart], { type: 'image/png' }) })]);
+      toast('copied');
+    } catch { toast('copy was blocked here — use Download or right-click'); }
+  };
+}
+
+// one self-contained .html: MathJax + the player bundle + this page's code, viewable offline in 3D
+async function buildStandaloneHTML(name: string, source: string): Promise<string> {
+  const get = async (u: string) => { const r = await fetch(u); if (!r.ok) throw new Error(`${u}: ${r.status}`); return r.text(); };
+  const [player, mathjax] = await Promise.all([get('./player/player.js'), get('./vendor/tex-svg-full.js')]);
+  const safe = (js: string) => js.replace(/<\/(script)/gi, '<\\/$1').replace(/<!--/g, '<\\!--');
+  const json = JSON.stringify({ name, source, exported: new Date().toISOString().slice(0, 10) }).replace(/</g, '\\u003c');
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${esc(name.replace(/\.bd$/, ''))} — LaTeX Modeler</title>
+<!-- Exported from LaTeX Modeler. Everything needed is inside this file: open it in any modern browser, no internet required. -->
+<!-- LaTeX Modeler player © smplesco, all rights reserved. Includes MathJax (Apache License 2.0, © The MathJax Consortium, https://www.mathjax.org) and three.js (MIT License, © three.js authors, https://threejs.org). The page content belongs to its author. -->
+<script>window.MathJax={loader:{load:[]},svg:{fontCache:'none'},options:{enableMenu:false,renderActions:{assistiveMml:[]}},startup:{typeset:false}};</script>
+<script>${safe(mathjax)}</script>
+<script>window.__LATEX_MODELER_DOC=${json};</script>
+</head>
+<body>
+<script>${safe(player)}</script>
+</body>
+</html>
+`;
+}
+async function exportHTML() {
+  const name = baseName() + '.html';
+  toast('building the interactive page…');
+  let html: string;
+  try { html = await buildStandaloneHTML(doc().name, editor.value); }
+  catch (e: any) { toast('HTML export failed: ' + (e.message || e)); return; }
+  const mb = (html.length / 1048576).toFixed(1);
+  if (platform.kind === 'desktop') { try { if (await platform.exportFile(name, html, 'text/html')) toast(`exported ${name} (${mb} MB)`); } catch (e: any) { toast('export failed: ' + (e.message || e)); } return; }
+  const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+  modal(`<h3>${esc(name)}</h3><p style="margin:4px 0 10px;line-height:1.5">A single ${mb} MB file with the page, the 3D viewer, the timeline and the Figure Explorer built in.
+    Anyone can open it in Chrome, Edge, Firefox or Safari — offline, nothing to install. Your code is included, so the reader sees exactly this page.</p>
+    <div class="row"><button class="vbtn" id="xOpen">Preview in a new tab</button><button class="vbtn" id="xClose">Close</button><button class="vbtn primary" id="xDl">Download</button></div>`);
+  $('xClose').onclick = () => { closeModal(); URL.revokeObjectURL(url); };
+  $('xOpen').onclick = () => window.open(url, '_blank');
+  $('xDl').onclick = () => platform.exportFile(name, html, 'text/html');
+}
+(window as any).__buildHTML = buildStandaloneHTML;
+
+async function exportImage(url: string, name: string) {
+  const bin = atob(url.split(',')[1]); const u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  if (platform.kind === 'desktop') { if (await platform.exportFile(name, u8, 'image/png')) toast('saved ' + name); return; }
+  modal(`<h3>${esc(name)}</h3><img src="${url}" alt="snapshot"><div class="row"><span>Right-click the image to save it if the download is blocked.</span><button class="vbtn" id="xClose">Close</button><button class="vbtn primary" id="xDl">Download</button></div>`);
+  $('xClose').onclick = closeModal; $('xDl').onclick = () => platform.exportFile(name, u8, 'image/png');
+}
+
+// ------------------------------------------------------------------ keyboard
+window.addEventListener('keydown', e => {
+  const mod = e.ctrlKey || e.metaKey;
+  if (mod && e.key.toLowerCase() === 's') { e.preventDefault(); saveDoc(doc(), e.shiftKey); return; }
+  if (mod && e.key.toLowerCase() === 'o') { e.preventDefault(); $('bOpen').click(); return; }
+  if (mod && e.key.toLowerCase() === 'm') { e.preventDefault(); mIn.focus(); mIn.select(); return; }
+  if (mod && e.altKey && e.key.toLowerCase() === 'n') { e.preventDefault(); $('bNew').click(); return; }
+  if (e.key === 'Escape') { closeModal(); exportMenu.classList.remove('show'); }
+  const typing = document.activeElement === editor.ta || document.activeElement === mIn || (document.activeElement as HTMLElement)?.tagName === 'SELECT';
+  if (typing || mod || e.altKey) return;
+  if (e.code === 'Space') { e.preventDefault(); setPlaying(!playing); }
+  else if (e.key === 'f' || e.key === 'F') $('bReset').click();
+  else if (e.key === 'o' || e.key === 'O') $('bOrtho').click();
+  else if ((e.key === 'e' || e.key === 'E') && !explorer.isOpen && lastCtx?.frames.length) explorer.open(0);
+});
+
+// ------------------------------------------------------------------ splitter
+const split = $('split'), main = $('main');
+split.addEventListener('pointerdown', e => {
+  split.setPointerCapture(e.pointerId); split.classList.add('drag');
+  const mv = (ev: PointerEvent) => { const r = main.getBoundingClientRect(); main.style.setProperty('--edw', Math.min(75, Math.max(18, (ev.clientX - r.left) / r.width * 100)) + '%'); };
+  const up = () => { split.classList.remove('drag'); split.removeEventListener('pointermove', mv); split.removeEventListener('pointerup', up); editor.refresh(); };
+  split.addEventListener('pointermove', mv); split.addEventListener('pointerup', up);
+});
+
+// ------------------------------------------------------------------ main loop
+let lastFrame = performance.now();
+function frame(now: number) {
+  requestAnimationFrame(frame);
+  const dt = Math.min(0.1, (now - lastFrame) / 1000); lastFrame = now;
+  if (playing) { let t = tCur + dt; if (t >= duration) t %= duration; setTime(t); viewer.dirty = true; }
+  viewer.tick();
+  chips.position();
+}
+
+async function boot() {
+  platform = await getPlatform();
+  $('sPlat').textContent = platform.kind === 'desktop' ? 'desktop' : 'web';
+  await texReady();
+  $('loading').remove();
+  loadSession();
+  const init = await platform.initialFile();
+  if (init) { const ex = docs.find(d => d.path === init.path); if (ex) current = ex.id; else { docs.push({ id: 'f' + Date.now(), name: init.name, text: init.text, saved: init.text, path: init.path }); current = docs[docs.length - 1].id; } }
+  editor.value = doc().text;
+  updateTabs(); renderPanel();
+  viewer.resize();
+  compile(true);
+  requestAnimationFrame(frame);
+  (window as any).__bdraw = { explorer, chips, compile, setTime, viewer, autoModel, modelIt, get problems() { return problems; }, get ctx() { return lastCtx; }, exportSVG: () => lastCtx && exportSVG(lastCtx), openDoc, docs: () => docs };
+}
+boot().catch(e => { const l = $('loading'); if (l) l.innerHTML = `<div style="color:#f88;padding:20px">Failed to start: ${esc(String(e?.message || e))}</div>`; console.error(e); });

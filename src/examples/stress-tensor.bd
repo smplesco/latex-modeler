@@ -1,0 +1,119 @@
+// stress-tensor.bd — a textbook page whose figure is real 3D.
+// Orbit the view: the cube rises off the paper. Press play.
+page("A4", "paper")
+duration(6)
+
+// ------------------------------------------------ title
+tex("\textbf{The Cauchy Stress Tensor}", (105, 279), {size: 22})
+tex("\text{state of stress at a material point}", (105, 270.5), {size: 11, color: "#666"})
+line((20, 264), (190, 264), {width: 0.3})
+
+// ------------------------------------------------ stress cube
+// axo() rotates the z-up model; onpage() pins it to the page.
+// The page view shows the textbook projection; orbit to see the solid.
+pr = onpage(axo(rad(38), rad(22)), (84, 214), 20)
+L = 1.05     // normal-stress arrow length
+T = 0.6      // shear arrow length
+sig = "#1f7fd6"
+tau = "#e0a100"
+
+// a face: closed outline with a translucent fill
+face(n, u, v, f) = poly([pr(n - u - v), pr(n + u - v), pr(n + u + v), pr(n - u + v)], {fill: f, opacity: 0.5, stroke: "#1d2733", width: 0.25})
+X = (1, 0, 0)
+Y = (0, 1, 0)
+Z = (0, 0, 1)
+face(-X, Y, Z, "#dfe9f5")
+face(-Y, X, Z, "#dfe9f5")
+face(-Z, X, Y, "#dfe9f5")
+face(X, Y, Z, "#dfe9f5")
+face(Y, X, Z, "#dfe9f5")
+face(Z, X, Y, "#dfe9f5")
+
+// stress arrows on the three visible faces
+arr(n, d, c) = arrow(pr(n), pr(n + d), {color: c, width: 0.35})
+stresses(n, u, v) = [arr(n, n * L, sig), arr(n, u * T, tau), arr(n, v * T, tau)]
+stresses(X, Y, Z)
+stresses(Y, X, Z)
+stresses(Z, X, Y)
+
+// labels face the viewer (orbit to see them turn)
+lab(s, p, c) = tex(s, pr(p), {size: 11, color: c, face: "viewer"})
+lab("\sigma_{11}", (2.3, 0, 0), sig)
+lab("\tau_{12}", (1, T + 0.25, 0), "#a87800")
+lab("\tau_{13}", (1, 0, T + 0.25), "#a87800")
+lab("\sigma_{22}", (0, 2.3, 0), sig)
+lab("\tau_{21}", (T + 0.25, 1, 0), "#a87800")
+lab("\tau_{23}", (0, 1, T + 0.25), "#a87800")
+lab("\sigma_{33}", (0, 0, 2.35), sig)
+lab("\tau_{31}", (T + 0.25, 0, 1), "#a87800")
+lab("\tau_{32}", (0, T + 0.25, 1), "#a87800")
+
+// coordinate triad (also 3D)
+tr = onpage(axo(rad(38), rad(22)), (30, 180), 10)
+for k in 0..3 {
+  e = [X, Y, Z][k]
+  arrow(tr((0, 0, 0)), tr(e), {width: 0.25})
+  tex("x_" + str(k + 1), tr(e * 1.45), {size: 10, face: "viewer"})
+}
+
+// the tensor itself
+tex("\boldsymbol{\sigma} = \begin{bmatrix} \sigma_{11} & \tau_{12} & \tau_{13} \\ \tau_{21} & \sigma_{22} & \tau_{23} \\ \tau_{31} & \tau_{32} & \sigma_{33} \end{bmatrix}", (160, 228), {size: 12})
+tex("\mathbf{t}^{(\mathbf{n})} = \boldsymbol{\sigma}^{\mathsf{T}}\mathbf{n}, \quad \tau_{ij} = \tau_{ji}", (160, 205), {size: 11.5})
+
+// ------------------------------------------------ relations
+head(s, x, y) = tex("\text{" + s + "}", (x, y), {size: 15, anchor: "w"})
+eq(s, x, y) = tex(s, (x + 4, y), {size: 12.5, anchor: "w"})
+
+head("Equilibrium", 20, 160)
+eq("\dfrac{\partial \sigma_{ij}}{\partial x_j} + b_i = \rho\,\ddot{u}_i", 20, 148)
+
+head("Principal stresses", 20, 132)
+eq("\det(\boldsymbol{\sigma} - \lambda \mathbf{I}) = 0", 20, 122)
+eq("\lambda^3 - I_1\lambda^2 + I_2\lambda - I_3 = 0", 20, 113)
+
+head("Invariants", 20, 97)
+eq("I_1 = \operatorname{tr}\boldsymbol{\sigma} = \sigma_{11} + \sigma_{22} + \sigma_{33}", 20, 87)
+eq("I_2 = \tfrac{1}{2}\left[(\operatorname{tr}\boldsymbol{\sigma})^2 - \operatorname{tr}(\boldsymbol{\sigma}^2)\right]", 20, 78)
+eq("I_3 = \det \boldsymbol{\sigma}", 20, 69)
+
+head("Deviator and von Mises", 20, 53)
+eq("s_{ij} = \sigma_{ij} - \tfrac{1}{3}\sigma_{kk}\,\delta_{ij}", 20, 43)
+eq("\sigma_v = \sqrt{\tfrac{3}{2}\, s_{ij}\, s_{ij}}", 20, 33)
+
+// ------------------------------------------------ Mohr's circle (animated)
+head("Mohr's circle (plane stress)", 118, 160)
+mo = (124, 118)
+k = 7
+sx = 4.2
+sy = 0.8
+txy = 1.6
+c = (sx + sy) / 2
+R = sqrt(((sx - sy) / 2) ^ 2 + txy ^ 2)
+arrow(mo + (-3, 0), mo + (44, 0), {width: 0.22})
+arrow(mo + (0, -23), mo + (0, 23), {width: 0.22})
+tex("\sigma", mo + (45.5, 0), {size: 10, anchor: "w"})
+tex("\tau", mo + (0, 24.5), {size: 10, anchor: "s"})
+circle(mo + (c * k, 0), R * k, {width: 0.35, color: sig})
+line(mo + (sx * k, txy * k), mo + (sy * k, -txy * k), {width: 0.22, dash: 1, color: "#777"})
+dot(mo + (sx * k, txy * k), {r: 0.6})
+dot(mo + (sy * k, -txy * k), {r: 0.6})
+tex("(\sigma_x, \tau_{xy})", mo + (sx * k + 2, txy * k + 2.5), {size: 8, anchor: "w"})
+tex("\sigma_2", mo + ((c - R) * k - 1, -3.5), {size: 9, anchor: "e"})
+tex("\sigma_1", mo + ((c + R) * k + 1, -3.5), {size: 9, anchor: "w"})
+dot(mo + ((c + R) * k, 0), {r: 0.6, color: sig})
+dot(mo + ((c - R) * k, 0), {r: 0.6, color: sig})
+
+// a plane rotating with time: its stress point runs around the circle
+th = pi * t / 6
+ph = atan2(txy, (sx - sy) / 2)
+q = mo + (c * k, 0) + (cos(2 * th + ph), sin(2 * th + ph)) * R * k
+line(mo + (c * k, 0), q, {width: 0.3, color: "#d64545"})
+dot(q, {r: 0.8, color: "#d64545"})
+tex("2\theta = " + fmt(deg(2 * th), 0) + "^\circ", mo + (c * k, -26), {size: 9, color: "#d64545"})
+
+tex("\sigma_{1,2} = \frac{\sigma_x + \sigma_y}{2} \pm \sqrt{\left(\frac{\sigma_x - \sigma_y}{2}\right)^2 + \tau_{xy}^2}", (116, 80), {size: 11, anchor: "w"})
+eq("\tau_{\max} = \tfrac{1}{2}(\sigma_1 - \sigma_2)", 112, 67)
+
+// ------------------------------------------------ footer
+line((20, 22), (190, 22), {width: 0.2, color: "#999"})
+tex("\text{Continuum Mechanics} \;\cdot\; \text{1}", (190, 17), {size: 8, anchor: "e", color: "#888"})

@@ -1,0 +1,19 @@
+// saddle.bd — a shaded surface in a textbook 3D frame, on graph paper.
+// frame3d draws the panes, grid, ticks and labels; splot samples, shades and
+// adds floor contours. The amplitude breathes with t: press play.
+page("A5", "grid")
+duration(6)
+
+tex("\textbf{Hyperbolic paraboloid}", (74, 197), {size: 16})
+tex("z = c\,(x^2 - y^2)", (74, 187), {size: 11, color: "#444"})
+
+c = 0.55 + 0.3 * sin(2 * pi * t / 6)
+f(x, y) = c * (x^2 - y^2)
+
+Fr = frame3d((74, 120), 62, (-1, 1), (-1, 1), (-1, 1), {zscale: 0.75})
+splot(Fr, f, {n: 48, wire: 12})
+dot(Fr.map((0, 0, 0)), {r: 0.8, color: "#d64545"})
+tex("\text{saddle point}", Fr.map((0, 0, 0)) + (3, -4, 0), {size: 7.5, anchor: "w", color: "#d64545"})
+
+tex("K = -\dfrac{4c^2}{\left(1 + 4c^2x^2 + 4c^2y^2\right)^2}", (74, 40), {size: 11})
+tex("c = " + fmt(c, 2), (74, 26), {size: 9, color: "#666"})

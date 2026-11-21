@@ -1,0 +1,19 @@
+Copyright (c) 2026 smplesco. All rights reserved.
+
+LaTeX Modeler, including its source code, compiled builds, documentation and
+design, is proprietary software owned by smplesco.
+
+No license is granted. Without prior written permission from the copyright
+holder, you may not use, copy, modify, merge, publish, distribute, sublicense,
+sell, or create derivative works of this software or any part of it.
+
+Viewing this repository on GitHub, and forking it within GitHub as GitHub's
+Terms of Service allow, does not grant any further rights.
+
+Pages that you create with LaTeX Modeler (your own .bd files and the images,
+SVG and HTML files you export from them) belong to you.
+
+Third-party components included with this software are licensed under their
+own terms; see THIRD_PARTY_NOTICES.md and the public/licenses folder.
+
+For permission requests, contact smplesco through GitHub.

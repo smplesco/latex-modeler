@@ -1,0 +1,40 @@
+// frenet-helix.bd — a space curve with its moving frame.
+// The point runs along the helix as t advances. Press play.
+page("A5", "paper")
+duration(8)
+
+tex("\textbf{The Frenet--Serret frame}", (74, 196), {size: 16})
+tex("\text{helix } \mathbf{r}(s) = (a\cos s,\; a\sin s,\; b s)", (74, 187), {size: 10, color: "#555"})
+line((14, 181), (134, 181), {width: 0.25})
+
+a = 1
+b = 0.18
+pr = onpage(axo(rad(30), rad(18)), (70, 100), 22)
+r(s) = (a * cos(s), a * sin(s), b * s)
+
+// axis and curve
+line(pr((0, 0, -0.3)), pr((0, 0, 4 * pi * b + 0.4)), {dash: 1.2, color: "#999", width: 0.2})
+curve(s => pr(r(s)), 0, 4 * pi, {width: 0.5, color: "#2a6fdb", n: 260})
+
+// moving frame at parameter u
+u = 4 * pi * t / 8
+p = r(u)
+Tv = normalize((-a * sin(u), a * cos(u), b))
+Nv = (-cos(u), -sin(u), 0)
+Bv = cross(Tv, Nv)
+frame(v, c, s) = [arrow(pr(p), pr(p + v * 0.75), {color: c, width: 0.4}), tex(s, pr(p + v * 0.98), {size: 10, color: c, face: "viewer"})]
+frame(Tv, "#d64545", "\mathbf{T}")
+frame(Nv, "#2e9e5b", "\mathbf{N}")
+frame(Bv, "#8a4fd6", "\mathbf{B}")
+dot(pr(p), {r: 0.9})
+// shadow of the point on the base circle
+dot(pr((p.x, p.y, 0)), {r: 0.6, color: "#bbb"})
+base = curve(s => pr((a * cos(s), a * sin(s), 0)), 0, 2 * pi, {width: 0.2, color: "#c8c8c8", n: 120})
+
+// equations
+eq(s, y) = tex(s, (20, y), {size: 10, anchor: "w"})
+eq("\mathbf{T}' = \kappa\,\mathbf{N}", 40)
+eq("\mathbf{N}' = -\kappa\,\mathbf{T} + \tau\,\mathbf{B}", 31)
+eq("\mathbf{B}' = -\tau\,\mathbf{N}", 22)
+tex("\kappa = \dfrac{a}{a^2 + b^2}, \qquad \tau = \dfrac{b}{a^2 + b^2}", (128, 31), {size: 10, anchor: "e"})
+tex("s = " + fmt(u, 2), (128, 52), {size: 9, anchor: "e", color: "#888"})

@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LaTeX Modeler — 3D LaTeX pages</title>
+<script>
+  // MathJax: local, self-contained SVG build (copied to public/vendor by `npm run vendor`)
+  window.MathJax = {
+    loader: { load: [] },
+    svg: { fontCache: 'none' },
+    options: { enableMenu: false, renderActions: { assistiveMml: [] } },
+    startup: { typeset: false }
+  };
+</script>
+<script src="./vendor/tex-svg-full.js"></script>
+</head>
+<body>
+<div id="app">
+  <div id="top">
+    <div id="brand"><svg viewBox="0 0 16 16"><path d="M2 3.5 8 1l6 2.5v9L8 15l-6-2.5z" fill="none" stroke="#36b4ff" stroke-width="1.4"/><path d="M2 3.5 8 6l6-2.5M8 6v9" fill="none" stroke="#36b4ff" stroke-width="1.4"/></svg><span>LaTeX Modeler</span></div>
+    <div id="tabs"></div>
+    <div id="topR">
+      <button class="tbtn opt" id="bNew" title="New page (Ctrl+N)">New</button>
+      <button class="tbtn" id="bOpen" title="Open a .bd file (Ctrl+O)">Open…</button>
+      <button class="tbtn" id="bSave" title="Save (Ctrl+S) — Shift-click for Save As">Save</button>
+      <button class="tbtn" id="bExport" title="Export the page">Export ▾
+        <div class="menu" id="exportMenu">
+          <div data-x="svg">Page as SVG <small>vector, for print</small></div>
+          <div data-x="png">Page as PNG <small>200 dpi</small></div>
+          <div data-x="html">Interactive HTML (3D) <small>one file, opens in any browser</small></div>
+          <div data-x="view">Current view as PNG <small>what you see</small></div>
+          <div data-x="code">Copy page code</div>
+        </div>
+      </button>
+      <button class="tbtn opt" id="bRevert" title="Restore this example's original code">Revert</button>
+    </div>
+  </div>
+
+  <div id="main">
+    <div id="edpane">
+      <div id="crumbs"><span id="crumbDir">examples</span> <span>›</span> <b id="crumbName">stress-tensor.bd</b> <span class="path" id="crumbPath"></span></div>
+      <div id="editor"></div>
+    </div>
+    <div id="split"></div>
+    <div id="viewpane">
+      <div id="modelbar">
+        <div class="mlabel" title="Type any LaTeX equation and LaTeX Modeler builds a page that models it">∑ Auto-model</div>
+        <input id="mIn" spellcheck="false" autocomplete="off" placeholder="type LaTeX, e.g.  z = \sin\sqrt{x^2+y^2}   then Enter">
+        <select id="mEx" title="Example equations"><option value="">Examples…</option></select>
+        <button class="vbtn primary" id="mGo" title="Generate a page for this equation (Enter)">Model it</button>
+      </div>
+      <div id="mprev"><span class="eq" id="mEq"></span><span class="kind" id="mKind"></span></div>
+      <div id="vbar">
+        <button id="play" title="Play / pause (Space)"><svg id="playIc" viewBox="0 0 12 12"><path d="M2 1l9 5-9 5z"/></svg></button>
+        <input type="range" id="slider" min="0" max="6" step="0.01" value="0" aria-label="time">
+        <span id="tval">t = 0.00</span>
+        <button class="vbtn on" id="bCam" title="Camera follows the timeline (script view() or a turntable tour)">Camera</button>
+        <button class="vbtn on" id="bOrtho" title="Orthographic / perspective (O)">Ortho</button>
+        <button class="vbtn" id="bReset" title="Back to the page view (F)">Reset</button>
+      </div>
+      <div id="gl">
+        <div id="loading"><div><div class="spin"></div>Loading MathJax &amp; three.js…</div></div>
+        <div id="hint">drag to orbit · right-drag to pan · scroll to zoom<br>click any element to jump to its code (Alt+click: inside the helper)</div>
+        <div id="pickTip"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="panel">
+    <div id="ptabs">
+      <div class="ptab act" data-p="problems">Problems <span class="badge" id="pcount">0</span></div>
+      <div class="ptab" data-p="output">Output</div>
+      <div class="ptab" data-p="ref">Reference</div>
+      <div id="pcoll" title="Collapse panel">▾</div>
+    </div>
+    <div id="pbody"></div>
+  </div>
+
+  <div id="status">
+    <span>LaTeX Modeler v0.1</span><span id="sPlat"></span><span id="sMsg">ready</span>
+    <div class="r"><span id="sObj"></span><span id="sTime"></span><span id="sPos">Ln 1, Col 1</span><span>bd</span></div>
+  </div>
+</div>
+
+<div id="modal"><div id="mbox"></div></div>
+<div id="toast"></div>
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>
