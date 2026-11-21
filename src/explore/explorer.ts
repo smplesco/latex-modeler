@@ -100,6 +100,51 @@ class Overlay {
   }
 }
 
+
+/** Build the explorer's version of figure `idx` (a re-sampled frame at explorer size) from a finished run.
+ *  Pure: used by the Explorer itself and by the compact HTML export (to know which labels it will need). */
+export function explorerScene(ctx: RunCtx, idx: number, ranges: number[] | null, equal: boolean | null, hq: boolean):
+  { EF: any; prims: any[]; errs: string[]; r: number[] } | { error: string } {
+  const T = ctx.frames[idx]; if (!T) return { error: 'This figure no longer exists on the page.' };
+    const PF = T.F; const opts0 = (T.args[T.dim === 2 ? 4 : 5] ?? {}) as any;
+  const B = ctx.B!; const pagePrims = ctx.prims;
+  ctx.prims = []; ctx.noHooks = true;
+  const def = T.dim === 3 ? [PF.x0, PF.x1, PF.y0, PF.y1, PF.z0, PF.z1] : [PF.x0, PF.x1, PF.y0, PF.y1];
+  const r = ranges ?? def;
+  const o = { ...(isObj(opts0) ? opts0 : {}), ...(equal !== null ? { equal } : {}) };
+  const V = (a: number[]) => new Vec(a);
+  let EF: any;
+  try {
+    EF = T.dim === 3 ? B.frame3d(V([100, 80]), 112, V([r[0], r[1]]), V([r[2], r[3]]), V([r[4], r[5]]), o)
+      : B.frame2d(V([16, 12]), V([170, 136]), V([r[0], r[1]]), V([r[2], r[3]]), o);
+  } catch (e: any) { ctx.prims = pagePrims; ctx.noHooks = false; return { error: 'Range error: ' + e.message }; }
+  const errs: string[] = [];
+  ctx.hooks.forEach((h, i) => {
+    if (h.frame !== T.id) return;
+    const args = [...h.args]; const last = args[args.length - 1];
+    const want = hq ? HQ[h.name] : undefined;
+    if (want) { if (isObj(last)) args[args.length - 1] = { ...last, n: Math.max(last.n ?? 0, want) }; else args.push({ n: want }); }
+    ctx.curHook = i;
+    try { B[h.name](EF, ...args); } catch (e: any) { errs.push(`${h.name} (line ${h.line}): ${e.message}`); }
+    ctx.curHook = undefined;
+  });
+  // carry the page's annotations (critical points, labels, moving points…) into explorer space
+  const conv = (q: number[]) => EF._raw(PF._inv(q));
+  for (const p0 of pagePrims) {
+    if (p0.fig !== T.fig || p0.role) continue;
+    const p = JSON.parse(JSON.stringify(p0));
+    const mapPts = (a: number[][]) => a.map(conv);
+    if (p.pts) p.pts = mapPts(p.pts);
+    if (p.a) { p.a = conv(p.a); p.b = conv(p.b); }
+    if (p.kind === 'dot') p.p = conv(p.p);
+    if (p.kind === 'tex') p.pos = conv(p.pos);
+    if (p.pos && (p.kind === 'segs' || p.kind === 'trimesh')) { const out: number[] = []; for (let i = 0; i < p.pos.length; i += 3) out.push(...conv([p.pos[i], p.pos[i + 1], p.pos[i + 2]])); p.pos = out; }
+    p.fig = EF.fig; ctx.prims.push(p);
+  }
+  const prims = ctx.prims; ctx.prims = pagePrims; ctx.noHooks = false;
+  return { EF, prims, errs, r };
+}
+
 export class Explorer {
   el: HTMLElement; gl!: HTMLElement; viewer: Viewer | null = null; ov!: Overlay; pins!: Overlay;
   fig: number | null = null; FT: { c: number[]; k: number; o: number[]; s: number; R: number[][]; Ri: number[][] } | null = null;
@@ -174,6 +219,8 @@ export class Explorer {
     };
     this.raf = requestAnimationFrame(loop);
   }
+  /** redraw (e.g. after missing LaTeX labels became available) */
+  refresh() { if (this.isOpen) this.rebuild(true); }
   close() { this.isOpen = false; this.el.classList.remove('show', 'max'); cancelAnimationFrame(this.raf); this.ov?.clear(); }
 
   private initViewer() {
@@ -257,42 +304,9 @@ export class Explorer {
     this.showFrameUI(true);
     const firstTime = !this.T || this.T.dim !== T.dim || resetCam;
     this.T = T; this.dim = T.dim; this.ctx = ctx; this.usesT = ctx.usesT; this.duration = ctx.duration ?? 6;
-    const PF = T.F; const opts0 = (T.args[T.dim === 2 ? 4 : 5] ?? {}) as any;
-    const B = ctx.B!; const pagePrims = ctx.prims;
-    ctx.prims = []; ctx.noHooks = true;
-    const def = T.dim === 3 ? [PF.x0, PF.x1, PF.y0, PF.y1, PF.z0, PF.z1] : [PF.x0, PF.x1, PF.y0, PF.y1];
-    const r = this.ranges ?? def;
-    const o = { ...(isObj(opts0) ? opts0 : {}), ...(this.equal !== null ? { equal: this.equal } : {}) };
-    const V = (a: number[]) => new Vec(a);
-    let EF: any;
-    try {
-      EF = T.dim === 3 ? B.frame3d(V([100, 80]), 112, V([r[0], r[1]]), V([r[2], r[3]]), V([r[4], r[5]]), o)
-        : B.frame2d(V([16, 12]), V([170, 136]), V([r[0], r[1]]), V([r[2], r[3]]), o);
-    } catch (e: any) { this.read('Range error: ' + e.message); ctx.prims = pagePrims; return; }
-    const errs: string[] = [];
-    ctx.hooks.forEach((h, i) => {
-      if (h.frame !== T.id) return;
-      const args = [...h.args]; const last = args[args.length - 1];
-      const want = hq ? HQ[h.name] : undefined;
-      if (want) { if (isObj(last)) args[args.length - 1] = { ...last, n: Math.max(last.n ?? 0, want) }; else args.push({ n: want }); }
-      ctx.curHook = i;
-      try { B[h.name](EF, ...args); } catch (e: any) { errs.push(`${h.name} (line ${h.line}): ${e.message}`); }
-      ctx.curHook = undefined;
-    });
-    // carry the page's annotations (critical points, labels, moving points…) into explorer space
-    const conv = (q: number[]) => EF._raw(PF._inv(q));
-    for (const p0 of pagePrims) {
-      if (p0.fig !== T.fig || p0.role) continue;
-      const p = JSON.parse(JSON.stringify(p0));
-      const mapPts = (a: number[][]) => a.map(conv);
-      if (p.pts) p.pts = mapPts(p.pts);
-      if (p.a) { p.a = conv(p.a); p.b = conv(p.b); }
-      if (p.kind === 'dot') p.p = conv(p.p);
-      if (p.kind === 'tex') p.pos = conv(p.pos);
-      if (p.pos && (p.kind === 'segs' || p.kind === 'trimesh')) { const out: number[] = []; for (let i = 0; i < p.pos.length; i += 3) out.push(...conv([p.pos[i], p.pos[i + 1], p.pos[i + 2]])); p.pos = out; }
-      p.fig = EF.fig; ctx.prims.push(p);
-    }
-    const prims = ctx.prims; ctx.prims = pagePrims; ctx.noHooks = false;
+    const sc = explorerScene(ctx, this.idx, this.ranges, this.equal, hq);
+    if ('error' in sc) { this.read(sc.error); return; }
+    const { EF, prims, errs, r } = sc;
     this.EF = EF; this.R = EF._R ?? null;
     v.build({ ...ctx, prims, page: { w: 200, h: 160, style: 'paper' } } as any, []);
     this.applyLayers();

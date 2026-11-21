@@ -3,7 +3,7 @@
 // any figure in the Figure Explorer. No editor, no file access, works offline.
 import { runProgram, RunCtx } from './lang/interp';
 import { Viewer } from './render/viewer';
-import { texReady, measureTex } from './render/tex';
+import { texReady, measureTex, onTexUpgrade } from './render/tex';
 import { Explorer } from './explore/explorer';
 import { FigureChips } from './explore/chips';
 import { APP_URL, shareFragment } from './share';
@@ -94,6 +94,8 @@ async function main() {
     else if (e.key === 'e' || e.key === 'E') $('bpExp').click();
   });
   compile(); $('bpLoad').remove();
+  // compact export: when MathJax arrives for labels that weren't pre-typeset, redraw
+  onTexUpgrade(() => { compile(); explorer.refresh(); });
   // link to an editable copy (the page code travels inside the link; skipped for very large pages)
   shareFragment(doc.name, doc.source).then(f => { if (f.length < 30000) { const a = $('bpOpen') as HTMLAnchorElement; a.href = APP_URL + '#' + f; a.style.display = ''; } }).catch(() => {});
   let last = performance.now();

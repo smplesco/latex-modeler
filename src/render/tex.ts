@@ -3,34 +3,68 @@ import * as THREE from 'three';
 import { SVGLoader } from 'three/addons/loaders/SVGLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
-declare global { interface Window { MathJax: any } }
+declare global { interface Window { MathJax: any; __TEX_SVG?: Record<string, string> } }
+
+// Compact exported pages ship pre-typeset SVG for every label they use (window.__TEX_SVG) instead of MathJax.
+// A label that isn't in that set (e.g. new tick numbers after zooming in the explorer) loads MathJax from a CDN,
+// and listeners redraw once it arrives. Offline, such labels stay blank.
+const MATHJAX_CDN = 'https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-svg-full.js';
+const hasMathJax = () => typeof window !== 'undefined' && typeof window.MathJax?.tex2svg === 'function';
+let mjLoading: Promise<void> | null = null; const upgradeListeners: (() => void)[] = [];
+/** called after MathJax arrives in a compact page, so views can redraw labels that were missing */
+export function onTexUpgrade(f: () => void) { upgradeListeners.push(f); }
+function loadMathJax() {
+  if (mjLoading || hasMathJax()) return;
+  mjLoading = new Promise<void>((res, rej) => {
+    const sc = document.createElement('script'); sc.src = MATHJAX_CDN; sc.async = true;
+    sc.onload = () => window.MathJax.startup.promise.then(res, rej); sc.onerror = () => rej(new Error('offline'));
+    document.head.appendChild(sc);
+  }).then(() => { for (const [k, e] of cache) if (e.missing) cache.delete(k); upgradeListeners.forEach(f => f()); })
+    .catch(() => { /* offline: missing labels stay blank */ });
+}
+// export recorder: which typeset labels a page uses
+let recording: Map<string, string> | null = null;
+export function recordTex() { recording = new Map(); }
+export function stopRecordingTex(): Record<string, string> { const r = Object.fromEntries(recording ?? []); recording = null; return r; }
 
 export interface TexEntry {
   groups: { geom: THREE.BufferGeometry; color: string | null }[];
   x0: number; x1: number; yTop: number; yBot: number;   // bounding box in em, y up, baseline at 0
   err: string | null;
   svgInner: string;                                      // MathJax <g> content (y down, 1/1000 em)
+  raw?: string; missing?: boolean;                       // serialized SVG (for compact export); placeholder flag
 }
 
 const loader = new SVGLoader();
 const cache = new Map<string, TexEntry>();
 const SENTINEL = '#010203';
 
-export async function texReady() { await window.MathJax.startup.promise; }
+export async function texReady() { if (window.MathJax?.startup?.promise) await window.MathJax.startup.promise; }
 
 function convert(src: string, display: boolean) {
   const node = window.MathJax.tex2svg(src, { display });
   return node.querySelector('svg') as SVGSVGElement;
 }
+const parser = typeof DOMParser !== 'undefined' ? new DOMParser() : null;
 
 export function getTex(src: string, display = false): TexEntry {
   const key = (display ? 'D:' : 'I:') + src;
-  const hit = cache.get(key); if (hit) return hit;
-  const svg = convert(src, display);
+  const hit = cache.get(key); if (hit) { if (recording && hit.raw) recording.set(key, hit.raw); return hit; }
+  let svg: SVGSVGElement;
+  if (hasMathJax()) svg = convert(src, display);
+  else {
+    const pre = window.__TEX_SVG?.[key];
+    if (!pre) {   // not pre-typeset: draw nothing for now, fetch MathJax, redraw later
+      loadMathJax();
+      const w = Math.max(0.5, src.length * 0.45), ph: TexEntry = { groups: [], x0: 0, x1: w, yTop: 0.7, yBot: -0.2, err: null, svgInner: '', missing: true };
+      cache.set(key, ph); return ph;
+    }
+    svg = parser!.parseFromString(pre, 'image/svg+xml').documentElement as unknown as SVGSVGElement;
+  }
   const errNode = svg.querySelector('[data-mjx-error]');
   const err = errNode ? errNode.getAttribute('data-mjx-error') : null;
   const vb = (svg.getAttribute('viewBox') || '0 0 0 0').split(/[\s,]+/).map(Number);
-  const str = new XMLSerializer().serializeToString(svg).replace(/currentColor/g, SENTINEL);
+  const raw = new XMLSerializer().serializeToString(svg); const str = raw.replace(/currentColor/g, SENTINEL);
   const data = loader.parse(str);
   const byColor = new Map<string, THREE.BufferGeometry[]>();
   for (const path of data.paths) {
@@ -51,7 +85,8 @@ export function getTex(src: string, display = false): TexEntry {
     groups.push({ geom: g, color: fill.toLowerCase() === SENTINEL ? null : fill });
   }
   const inner = Array.from(svg.childNodes).map(n => new XMLSerializer().serializeToString(n)).join('');
-  const entry: TexEntry = { groups, x0: vb[0] / 1000, x1: (vb[0] + vb[2]) / 1000, yTop: -vb[1] / 1000, yBot: -(vb[1] + vb[3]) / 1000, err, svgInner: inner };
+  const entry: TexEntry = { groups, x0: vb[0] / 1000, x1: (vb[0] + vb[2]) / 1000, yTop: -vb[1] / 1000, yBot: -(vb[1] + vb[3]) / 1000, err, svgInner: inner, raw };
+  if (recording) recording.set(key, raw);
   cache.set(key, entry);
   if (cache.size > 3000) { const first = cache.keys().next().value!; cache.get(first)!.groups.forEach(g => g.geom.dispose()); cache.delete(first); }
   return entry;

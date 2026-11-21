@@ -5,7 +5,7 @@ import '@fontsource/jetbrains-mono/400.css';
 import './styles.css';
 import { runProgram, RunCtx } from './lang/interp';
 import { Viewer } from './render/viewer';
-import { texReady, measureTex, previewSVG } from './render/tex';
+import { texReady, measureTex, previewSVG, getTex, recordTex, stopRecordingTex } from './render/tex';
 import { exportSVG } from './render/export';
 import { Editor } from './editor/editor';
 import { MODEL_EXAMPLES } from './model/examples';
@@ -342,22 +342,55 @@ async function doExport(kind: string) {
 }
 
 // one self-contained .html: MathJax + the player bundle + this page's code, viewable offline in 3D
-async function buildStandaloneHTML(name: string, source: string): Promise<string> {
+/** every LaTeX label a page needs: on the page across its timeline, and in each figure's explorer view */
+let labelMemo: { source: string; r: { tex: Record<string, string>; complete: boolean } } | null = null;
+async function collectLabels(source: string): Promise<{ tex: Record<string, string>; complete: boolean }> {
+  if (labelMemo?.source === source) return labelMemo.r;
+  const r = await collectLabelsNow(source); labelMemo = { source, r }; return r;
+}
+async function collectLabelsNow(source: string): Promise<{ tex: Record<string, string>; complete: boolean }> {
+  const { explorerScene } = await import('./explore/explorer');
+  const t0 = performance.now(); const first = runProgram(source, 0, { measure: measureTex }); const cost = performance.now() - t0;
+  // sample the timeline densely for light pages, more sparsely for heavy ones (keeps export to a few seconds)
+  const dur = first.duration ?? 6, N = first.usesT ? Math.max(16, Math.min(60, Math.round(2500 / Math.max(1, cost)))) : 0;
+  const visit = (t: number, explore: boolean) => {
+    const ctx = runProgram(source, t, { measure: measureTex });
+    for (const p of ctx.prims) if (p.kind === 'tex') getTex(p.src, p.display);
+    if (explore) for (let i = 0; i < ctx.frames.length; i++) {
+      const sc = explorerScene(ctx, i, null, null, false);   // sampling density doesn't change labels
+      if (!('error' in sc)) for (const p of sc.prims) if (p.kind === 'tex') getTex(p.src, p.display);
+    }
+  };
+  recordTex();
+  try { for (let k = 0; k <= N; k++) visit(N ? dur * k / N : 0, k % 15 === 0); }
+  finally { var tex = stopRecordingTex(); }
+  // spot-check between the samples: if new labels show up there, the page has continuously changing text
+  let complete = true;
+  if (N) {
+    recordTex();
+    try { for (let k = 0; k < 12; k++) visit(dur * (k + 0.37) / 12, false); } finally { const extra = stopRecordingTex(); complete = Object.keys(extra).every(k => k in tex); }
+  }
+  return { tex, complete };
+}
+// one self-contained .html: the player bundle + this page's code; MathJax in full, or (compact) just the labels it uses
+async function buildStandaloneHTML(name: string, source: string, mode: 'full' | 'compact' = 'full'): Promise<string> {
   const get = async (u: string) => { const r = await fetch(u); if (!r.ok) throw new Error(`${u}: ${r.status}`); return r.text(); };
-  const [player, mathjax] = await Promise.all([get('./player/player.js'), get('./vendor/tex-svg-full.js')]);
+  const [player, mathjax] = await Promise.all([get('./player/player.js'), mode === 'full' ? get('./vendor/tex-svg-full.js') : Promise.resolve('')]);
   const safe = (js: string) => js.replace(/<\/(script)/gi, '<\\/$1').replace(/<!--/g, '<\\!--');
-  const json = JSON.stringify({ name, source, exported: new Date().toISOString().slice(0, 10) }).replace(/</g, '\\u003c');
+  const json = (o: any) => JSON.stringify(o).replace(/</g, '\\u003c');
+  const doc = json({ name, source, exported: new Date().toISOString().slice(0, 10) });
+  const labels = mode === 'compact' ? (await collectLabels(source)).tex : null;
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(name.replace(/\.bd$/, ''))} — LaTeX Modeler</title>
-<!-- Exported from LaTeX Modeler. Everything needed is inside this file: open it in any modern browser, no internet required. -->
+<!-- Exported from LaTeX Modeler. ${mode === 'full' ? 'Everything needed is inside this file: open it in any modern browser, no internet required.' : 'Compact export: the LaTeX labels are pre-rendered inside this file; only new labels (e.g. after zooming in the explorer) need an internet connection.'} -->
 <!-- LaTeX Modeler player © smplesco, all rights reserved. Includes MathJax (Apache License 2.0, © The MathJax Consortium, https://www.mathjax.org) and three.js (MIT License, © three.js authors, https://threejs.org). The page content belongs to its author. -->
 <script>window.MathJax={loader:{load:[]},svg:{fontCache:'none'},options:{enableMenu:false,renderActions:{assistiveMml:[]}},startup:{typeset:false}};</script>
-<script>${safe(mathjax)}</script>
-<script>window.__LATEX_MODELER_DOC=${json};</script>
+${mode === 'full' ? `<script>${safe(mathjax)}</script>` : `<script>window.__TEX_SVG=${json(labels)};</script>`}
+<script>window.__LATEX_MODELER_DOC=${doc};</script>
 </head>
 <body>
 <script>${safe(player)}</script>
@@ -368,18 +401,23 @@ async function buildStandaloneHTML(name: string, source: string): Promise<string
 async function exportHTML() {
   const name = baseName() + '.html';
   toast('building the interactive page…');
-  let html: string;
-  try { html = await buildStandaloneHTML(doc().name, editor.value); }
-  catch (e: any) { toast('HTML export failed: ' + (e.message || e)); return; }
-  const mb = (html.length / 1048576).toFixed(1);
-  if (platform.kind === 'desktop') { try { if (await platform.exportFile(name, html, 'text/html')) toast(`exported ${name} (${mb} MB)`); } catch (e: any) { toast('export failed: ' + (e.message || e)); } return; }
-  const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
-  modal(`<h3>${esc(name)}</h3><p style="margin:4px 0 10px;line-height:1.5">A single ${mb} MB file with the page, the 3D viewer, the timeline and the Figure Explorer built in.
-    Anyone can open it in Chrome, Edge, Firefox or Safari — offline, nothing to install. Your code is included, so the reader sees exactly this page.</p>
-    <div class="row"><button class="vbtn" id="xOpen">Preview in a new tab</button><button class="vbtn" id="xClose">Close</button><button class="vbtn primary" id="xDl">Download</button></div>`);
+  let full: string, compact: string, complete = true;
+  try {
+    full = await buildStandaloneHTML(doc().name, editor.value, 'full');
+    compact = await buildStandaloneHTML(doc().name, editor.value, 'compact');
+    complete = (await collectLabels(editor.value)).complete;
+  } catch (e: any) { toast('HTML export failed: ' + (e.message || e)); return; }
+  const mb = (s: string) => (s.length / 1048576).toFixed(s.length < 1048576 ? 2 : 1);
+  const save = (html: string) => platform.exportFile(name, html, 'text/html').then(ok => { if (ok && platform.kind === 'desktop') toast(`exported ${name}`); }).catch((e: any) => toast('export failed: ' + (e.message || e)));
+  const url = URL.createObjectURL(new Blob([compact], { type: 'text/html' }));
+  modal(`<h3>${esc(name)}</h3><p style="margin:4px 0 8px;line-height:1.5">One file with the page, the 3D viewer, the timeline and the Figure Explorer built in. It opens in Chrome, Edge, Firefox or Safari with nothing to install, and your code is included so readers see exactly this page.</p>
+    <p style="margin:0 0 10px;line-height:1.55"><b>Compact · ${mb(compact)} MB</b> — every label on this page is pre-rendered inside the file. ${complete ? 'It works offline;' : '<span style="color:#e0a24a">This page has labels that change continuously as it plays, so those need an internet connection;</span>'} new labels made by zooming in the explorer also load from the internet (offline they stay blank).<br>
+    <b>Full · ${mb(full)} MB</b> — includes the complete LaTeX engine, so everything works offline, always.</p>
+    <div class="row"><button class="vbtn" id="xOpen">Preview</button><button class="vbtn" id="xClose">Close</button><button class="vbtn" id="xFull">Download full</button><button class="vbtn primary" id="xCompact">Download compact</button></div>`);
   $('xClose').onclick = () => { closeModal(); URL.revokeObjectURL(url); };
   $('xOpen').onclick = () => window.open(url, '_blank');
-  $('xDl').onclick = () => platform.exportFile(name, html, 'text/html');
+  $('xFull').onclick = () => save(full);
+  $('xCompact').onclick = () => save(compact);
 }
 (window as any).__buildHTML = buildStandaloneHTML;
 
