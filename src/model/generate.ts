@@ -1064,33 +1064,4 @@ function invert3(m: number[][]): number[][] | null {
   return [[A / det, -(b * i - c * h) / det, (b * f - c * e) / det], [B / det, (a * i - c * g) / det, -(a * f - c * d) / det], [C / det, -(a * h - b * g) / det, (a * e - b * d) / det]];
 }
 
-export const MODEL_EXAMPLES: { label: string; tex: string }[] = [
-  { label: 'sinc', tex: 'y = \\frac{\\sin x}{x}' },
-  { label: 'cubic', tex: 'f(x) = x^3 - 3x' },
-  { label: 'ripple', tex: 'z = \\sin\\sqrt{x^2 + y^2}' },
-  { label: 'peaks', tex: 'z = x e^{-x^2 - y^2}' },
-  { label: 'heart', tex: '(x^2 + y^2 - 1)^3 = x^2 y^3' },
-  { label: 'ellipse', tex: '\\frac{x^2}{9} + \\frac{y^2}{4} = 1' },
-  { label: 'ellipsoid', tex: 'x^2 + \\frac{y^2}{4} + z^2 = 1' },
-  { label: 'hyperboloid', tex: 'x^2 + y^2 - z^2 = 1' },
-  { label: 'cardioid', tex: 'r = 1 + \\cos\\theta' },
-  { label: 'rose', tex: 'r = \\sin 4\\theta' },
-  { label: 'helix', tex: '\\mathbf{r}(t) = (\\cos t,\\ \\sin t,\\ t/5)' },
-  { label: 'Lissajous', tex: '\\mathbf{r}(t) = \\begin{pmatrix} \\sin 3t \\\\ \\sin 4t \\end{pmatrix}' },
-  { label: 'torus', tex: '\\mathbf{r}(u, v) = ((2 + \\cos v)\\cos u,\\ (2 + \\cos v)\\sin u,\\ \\sin v)' },
-  { label: 'sphere', tex: 'r = 1 + 0.3\\sin 3\\theta \\sin 2\\phi' },
-  { label: 'rotation field', tex: '\\mathbf{F}(x, y) = (-y,\\ x)' },
-  { label: 'saddle field', tex: '\\mathbf{F}(x, y) = (x,\\ -y)' },
-  { label: 'logistic ODE', tex: '\\frac{dy}{dx} = y(1 - y)' },
-  { label: "y' = x - y", tex: "y' = x - y" },
-  { label: 'shear matrix', tex: 'A = \\begin{pmatrix} 1 & 1 \\\\ 0 & 1 \\end{pmatrix}' },
-  { label: '3×3 matrix', tex: 'A = \\begin{bmatrix} 2 & 0 & 1 \\\\ 0 & 1 & 0 \\\\ 1 & 0 & 2 \\end{bmatrix}' },
-  { label: 'region', tex: 'x^2 + y^2 \\le 4' },
-  { label: 'system', tex: 'x^2 + y^2 = 4, \\quad y = x^2 - 1' },
-  { label: 'solve', tex: 'x^3 - 2x = 1' },
-  { label: 'gravity', tex: 'F = G\\frac{m_1 m_2}{r^2}' },
-  { label: 'Fourier', tex: 'y = \\sum_{n=1}^{8} \\frac{\\sin((2n-1)x)}{2n-1}' },
-  { label: 'piecewise', tex: 'f(x) = \\begin{cases} x^2 & x < 0 \\\\ \\sqrt{x} & x \\ge 0 \\end{cases}' },
-  { label: '± semicircles', tex: 'y = \\pm\\sqrt{4 - x^2}' },
-  { label: 'quadratic', tex: 'x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}' },
-];
+export { MODEL_EXAMPLES } from './examples';

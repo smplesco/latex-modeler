@@ -8,11 +8,12 @@ import { Viewer } from './render/viewer';
 import { texReady, measureTex, previewSVG } from './render/tex';
 import { exportSVG } from './render/export';
 import { Editor } from './editor/editor';
-import { autoModel, MODEL_EXAMPLES, ModelResult } from './model/generate';
+import { MODEL_EXAMPLES } from './model/examples';
+import type { ModelResult } from './model/generate';
 import { getPlatform, Platform } from './platform';
 import { REFERENCE } from './ui/reference';
-import { Explorer } from './explore/explorer';
-import { FigureChips } from './explore/chips';
+import type { Explorer } from './explore/explorer';
+import { FigureChips, type ExploreTarget } from './explore/chips';
 
 import stressSrc from './examples/stress-tensor.bd?raw';
 import helixSrc from './examples/frenet-helix.bd?raw';
@@ -46,7 +47,9 @@ let platform: Platform;
 const editor = new Editor($('editor'));
 const viewer = new Viewer($('gl'));
 // ---- Figure Explorer: open any figure as a live 3D / 2D graph
-const explorer = new Explorer($('viewpane'), {
+// the Figure Explorer is loaded the first time someone opens a figure (keeps start-up light)
+let explorer: Explorer | null = null, explorerLoad: Promise<Explorer> | null = null;
+const getExplorer = () => (explorerLoad ??= import('./explore/explorer').then(m => (explorer = new m.Explorer($('viewpane'), {
   source: () => editor.value,
   time: () => tCur,
   measure: measureTex,
@@ -61,8 +64,9 @@ const explorer = new Explorer($('viewpane'), {
     toast(`${name} = ${+value.toPrecision(6)} written to line ${line}`);
   },
   snapshot: (url, name) => exportImage(url, name),
-});
-const chips = new FigureChips($('gl'), viewer, (t) => explorer.openTarget(t));
+}))));
+const openExplore = (t: ExploreTarget) => getExplorer().then(x => x.openTarget(t)).catch(e => toast('could not open the explorer: ' + (e?.message || e)));
+const chips = new FigureChips($('gl'), viewer, openExplore);
 
 function updateTabs() {
   const tabs = $('tabs'); tabs.innerHTML = '';
@@ -256,8 +260,11 @@ let modelWarnings: string[] = [];
 const mIn = $<HTMLInputElement>('mIn'), mEx = $<HTMLSelectElement>('mEx');
 for (const ex of MODEL_EXAMPLES) { const o = document.createElement('option'); o.value = ex.tex; o.textContent = ex.label; mEx.appendChild(o); }
 let previewTimer = 0, lastModel: { tex: string; r: ModelResult } | null = null;
-function runModel(tex: string) { if (lastModel?.tex === tex) return lastModel.r; const r = autoModel(tex); lastModel = { tex, r }; return r; }
-function preview() {
+let modeller: typeof import('./model/generate') | null = null;
+const loadModeller = () => import('./model/generate').then(m => (modeller = m));
+function runModel(tex: string) { if (lastModel?.tex === tex) return lastModel.r; const r = modeller!.autoModel(tex); lastModel = { tex, r }; return r; }
+async function preview() {
+  if (!modeller) await loadModeller();
   const tex = mIn.value.trim();
   const box = $('mprev');
   if (!tex) { box.classList.remove('show'); return; }
@@ -274,7 +281,8 @@ mIn.addEventListener('input', () => { clearTimeout(previewTimer); previewTimer =
 mIn.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); modelIt(); } });
 mEx.addEventListener('change', () => { if (!mEx.value) return; mIn.value = mEx.value; mEx.value = ''; preview(); modelIt(); });
 $('mGo').onclick = () => modelIt();
-function modelIt() {
+async function modelIt() {
+  if (!modeller) { try { await loadModeller(); } catch (e: any) { toast('could not load the modeller: ' + (e?.message || e)); return; } }
   const tex = mIn.value.trim();
   if (!tex) { mIn.focus(); toast('type an equation first, or pick one from Examples'); return; }
   const r = runModel(tex);
@@ -393,7 +401,7 @@ window.addEventListener('keydown', e => {
   if (e.code === 'Space') { e.preventDefault(); setPlaying(!playing); }
   else if (e.key === 'f' || e.key === 'F') $('bReset').click();
   else if (e.key === 'o' || e.key === 'O') $('bOrtho').click();
-  else if ((e.key === 'e' || e.key === 'E') && !explorer.isOpen && chips.first()) explorer.openTarget(chips.first()!);
+  else if ((e.key === 'e' || e.key === 'E') && !explorer?.isOpen && chips.first()) openExplore(chips.first()!);
 });
 
 // ------------------------------------------------------------------ splitter
@@ -428,6 +436,6 @@ async function boot() {
   viewer.resize();
   compile(true);
   requestAnimationFrame(frame);
-  (window as any).__bdraw = { explorer, chips, compile, setTime, viewer, autoModel, modelIt, get problems() { return problems; }, get ctx() { return lastCtx; }, exportSVG: () => lastCtx && exportSVG(lastCtx), openDoc, docs: () => docs };
+  (window as any).__bdraw = { get explorer() { return explorer; }, openExplore, chips, compile, setTime, viewer, get autoModel() { return modeller?.autoModel; }, modelIt, get problems() { return problems; }, get ctx() { return lastCtx; }, exportSVG: () => lastCtx && exportSVG(lastCtx), openDoc, docs: () => docs };
 }
 boot().catch(e => { const l = $('loading'); if (l) l.innerHTML = `<div style="color:#f88;padding:20px">Failed to start: ${esc(String(e?.message || e))}</div>`; console.error(e); });

@@ -13,7 +13,8 @@
     startup: { typeset: false }
   };
 </script>
-<script src="./vendor/tex-svg-full.js"></script>
+<!-- defer: the page can paint its loading screen while MathJax downloads; it still runs before the app module -->
+<script defer src="./vendor/tex-svg-full.js"></script>
 </head>
 <body>
 <div id="app">
