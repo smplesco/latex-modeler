@@ -8,7 +8,8 @@ import * as nm from './numeric';
 import { BUILTIN_NAMES } from '../lang/interp';
 import { cmapHex } from '../geom/colormap';
 import { niceTicks } from '../geom/ticks';
-import { integrate, limitOf, seriesSum, identify } from './calculus';
+import { integrate, limitOf, seriesSum, productOf, identify } from './calculus';
+import { antiderivative } from './antideriv';
 
 export interface ModelResult { ok: boolean; kind?: string; title?: string; detected?: string; code?: string; warnings: string[]; error?: string }
 
@@ -363,9 +364,10 @@ type CalcSpec =
   | { kind: 'integral'; f: Node; v: string; a: Node; b: Node }
   | { kind: 'accum'; f: Node; v: string; a: Node; x: string; fname: string; indefinite: boolean }
   | { kind: 'limit'; f: Node; v: string; to: Node; dir: number }
-  | { kind: 'series'; f: Node; i: string; n0: Node; x: string | null };
+  | { kind: 'series'; f: Node; i: string; n0: Node; x: string | null }
+  | { kind: 'product'; f: Node; i: string; n0: Node };
 const isInfNum = (n: Node) => n.k === 'num' && !isFinite(n.v);
-const isCalc = (n: Node) => n.k === 'int' || n.k === 'lim' || (n.k === 'sum' && !n.prod && isInfNum(n.hi));
+const isCalc = (n: Node) => n.k === 'int' || n.k === 'lim' || (n.k === 'sum' && isInfNum(n.hi));
 /** recognise an integral / limit / infinite series statement (possibly named: F(x) = \int_0^x …) */
 function calculusSpec(main: Node[]): { spec: CalcSpec; vars: string[] } | null {
   if (main.length !== 1) return null;
@@ -392,14 +394,57 @@ function calculusSpec(main: Node[]): { spec: CalcSpec; vars: string[] } | null {
   const t = target as Extract<Node, { k: 'sum' }>;
   if (freeSyms(t.lo).size) throw new MathError('the series must start at a number, like \\sum_{n=1}^{\\infty}');
   const others = [...freeSyms(t.body)].filter(v => v !== t.i);
+  if (t.prod) {
+    if (others.length) throw new MathError('infinite products with a variable (like \\prod (1 - x^2/n^2)) aren’t supported yet — try a numeric product');
+    return { spec: { kind: 'product', f: simplify(t.body), i: t.i, n0: t.lo }, vars: [] };
+  }
   const x = others.includes('x') ? 'x' : others.length === 1 ? others[0] : null;
   return { spec: { kind: 'series', f: simplify(t.body), i: t.i, n0: t.lo, x }, vars: x ? [x] : [] };
 }
 const evalNum = (n: Node, cx: Ctx) => { if (isInfNum(n)) return (n as any).v as number; const v = compile(n, [], P1(cx))(); if (Number.isNaN(v)) throw new MathError('could not evaluate ' + toTex(n)); return v; };
 /** '= exact' when a closed form is recognised, otherwise '≈ decimal' */
+/** worth adding a decimal: forms with π, e, ln or √ (not plain fractions) */
+const irrationalForm = (id: string | null) => !!id && /\\pi|\\sqrt|\\ln|(^|[^a-z])e(\^|$|[^a-z])/.test(id);
 const shownEq = (v: number, tol: number) => { const id = identify(v, tol); return id ? '= ' + id : '\\approx ' + prettyNum(v, false).replace(/^\\approx\s*/, ''); };
 /** f(var) code for the page; the integrand's own variable name is kept */
 function calcHeader(C: Code, cx: Ctx, title: string, detected: string, dur: number) { header(C, cx, title, detected, dur); }
+
+/** L'Hôpital's rule for a quotient with a 0/0 or ∞/∞ form: the chain lim N/D = lim N'/D' = … until it resolves */
+function lhopital(f: Node, v: string, a: number, dir: number, cx: Ctx, vl: string, toT: string): string[] | null {
+  if (f.k !== 'mul') return null;
+  // denominators: negative powers, and e^(−u) read as 1/e^u (so x²/eˣ counts as a quotient)
+  const negExp = (t: Node) => t.k === 'fn' && t.f === 'exp' && depends(t.a[0], v) && toTex(t.a[0]).startsWith('-');
+  const den = f.a.filter(t => (t.k === 'pow' && t.e.k === 'num' && t.e.v < 0 && depends(t.b, v)) || negExp(t));
+  if (!den.length) return null;
+  let Nn = simplify(mul(...f.a.filter(t => !den.includes(t)), N(1)));
+  let Dn = simplify(mul(...den.map(t => (t.k === 'fn' ? fn('exp', neg(t.a[0])) : pow((t as any).b, -(t as any).e.v)))));
+  // does g tend to 0, to ±∞, or neither? (slow growth like ln x and overflow like eˣ both count as ∞)
+  const tends = (n: Node): '0' | 'inf' | null => {
+    const g = compile(n, [v], P1(cx)); const sides = isFinite(a) ? (dir ? [dir] : [-1, 1]) : [a > 0 ? 1 : -1];
+    const verdicts = sides.map(sd => {
+      const xs = isFinite(a) ? [3, 4, 5, 6, 7].map(k => a + sd * 10 ** -k) : [2, 3, 4, 5, 6].map(k => sd * 10 ** k);
+      const m = xs.map(t => Math.abs(g(t)));
+      if (m.some(Number.isNaN)) return null;
+      if (m.every((y, i) => i === 0 || y >= m[i - 1] * 1.01) && (m[4] > 30 || (m[4] > 5 && m[4] > 2 * m[0]))) return 'inf';
+      if (m.every((y, i) => i === 0 || y <= m[i - 1] * 1.0001) && m[4] < 1e-3) return '0';
+      return null;
+    });
+    return verdicts.every(x => x === verdicts[0]) ? verdicts[0] : null;
+  };
+  const form = (n: Node, d: Node) => { const tn = tends(n), td = tends(d); return tn && tn === td ? (tn === '0' ? '0/0' : '∞/∞') : null; };
+  const first = form(Nn, Dn); if (!first) return null;
+  const limW = `\\lim_{${vl} \\to ${toT}${dir > 0 ? '^+' : dir < 0 ? '^-' : ''}}`;
+  const steps: string[] = [`${T('a ')}${first === '0/0' ? '\\tfrac{0}{0}' : '\\tfrac{\\infty}{\\infty}'}${T(' form, so differentiate top and bottom:')}`];
+  for (let k = 0; k < 4; k++) {
+    const dN = tryDiff(Nn, v), dD = tryDiff(Dn, v); if (!dN || !dD) return null;
+    Nn = dN; Dn = dD;
+    const t = `= ${limW} \\frac{${toTex(Nn)}}{${toTex(Dn)}}`;
+    if (t.length > 150) return null;
+    steps.push(t);
+    if (!form(Nn, Dn)) return steps;
+  }
+  return null;
+}
 
 const CALC_GENERATORS: Record<string, any> = {
   // ------------------------------------------------------------ ∫_a^b f(x) dx
@@ -409,6 +454,16 @@ const CALC_GENERATORS: Record<string, any> = {
     const a = evalNum(s.a, cx), b = evalNum(s.b, cx);
     const lo = Math.min(a, b), hi = Math.max(a, b), finite = isFinite(lo) && isFinite(hi);
     const res = integrate(f, a, b);
+    // symbolic antiderivative → F(b) − F(a); trusted only when it agrees with the numerical value
+    // (an integrand that blows up inside [a, b] makes F(b) − F(a) meaningless, e.g. ∫₋₁¹ dx/x²)
+    const Fs = antiderivative(s.f, v);
+    let ftc: number | null = null;
+    if (Fs && !res.diverges) {
+      const Fc = compile(Fs, [v], P1(cx));
+      const at = (p: number) => { if (isFinite(p)) return Fc(p); const r = limitOf(Fc, p, 0); return r.kind === 'value' ? r.v : NaN; };
+      const val = at(b) - at(a);
+      if (isFinite(val) && Math.abs(val - res.v) <= 1e-6 * Math.max(1, Math.abs(res.v))) ftc = val;
+    }
     // view: the interval plus a margin; for infinite limits, out to where the integrand has faded
     let x0: number, x1: number;
     if (finite) { const pad = (hi - lo) * 0.15 || 1; [x0, x1] = [lo - pad, hi + pad]; }
@@ -424,7 +479,8 @@ const CALC_GENERATORS: Record<string, any> = {
     let [ya, yb] = nm.robustRange(ys); ya = Math.min(ya, 0); yb = Math.max(yb, 0);
     const [y0, y1] = nm.niceRange(ya, yb, 0.1);
     const trig = hasFn(s.f, TRIG, v) && (x1 - x0) >= Math.PI;
-    const valTex = res.diverges ? '' : shownEq(res.v, Math.max(1e-11 * Math.max(1, Math.abs(res.v)), res.err * 10));
+    const best = ftc ?? res.v, bestTol = ftc !== null ? 1e-11 * Math.max(1, Math.abs(ftc)) : Math.max(1e-11 * Math.max(1, Math.abs(res.v)), res.err * 10);
+    const valTex = res.diverges ? '' : shownEq(best, bestTol);
     const intTex = `\\int_{${toTex(s.a)}}^{${toTex(s.b)}} ${texOf(s.f)}\\,d${vl}`;
     const title = res.diverges ? 'Integral (diverges)' : finite ? 'Definite integral' : 'Improper integral';
     const detected = finite ? 'definite integral: area under the curve' : 'improper integral over an infinite interval';
@@ -432,7 +488,9 @@ const CALC_GENERATORS: Record<string, any> = {
     C.sec('the integrand and the interval');
     C.l(`f(${V_}) = ${code(s.f)}`);
     C.l(`A = ${nf(a)}`).l(`B = ${nf(b)}`).l(`X0 = ${nf(x0)}`).l(`X1 = ${nf(x1)}`).l(`Y0 = ${nf(y0)}`).l(`Y1 = ${nf(y1)}`);
-    if (!res.diverges) C.l(`I = ${nf(res.v)}   // value of the integral (computed numerically when the page was made)`);
+    if (Fs) C.l(`Fanti(${V_}) = ${code(Fs)}   // an antiderivative: Fanti' = f`);
+    if (ftc !== null && finite) C.l('I = Fanti(B) - Fanti(A)   // the fundamental theorem of calculus');
+    else if (!res.diverges) C.l(`I = ${nf(res.v)}   // value of the integral (computed numerically when the page was made)`);
     C.sec('figure: the signed area (blue above the axis, red below)');
     C.l(`Fr = frame2d((30, 134), (150, 110), (X0, X1), (Y0, Y1), {xlabel: ${q(vl)}, ylabel: "y"${trig ? ', piTicks: true' : ''}})`);
     C.l('NA = 240').l('xa = max(min(A, B), X0)').l('xb = min(max(A, B), X1)');
@@ -458,9 +516,21 @@ const CALC_GENERATORS: Record<string, any> = {
         : 'tex("n = " + str(n) + ",\\quad M_n = " + fmt(M, 6) + ",\\quad M_n - I = " + fmt(M - I, 6), (105, 127), {size: 10, color: "#b8741a"})');
     }
     const left: Fact[] = [], right: Fact[] = [];
-    if (res.diverges) left.push({ head: 'Value', eqs: [intTex, T('diverges: the area is infinite')] });
+    if (res.diverges) {
+      left.push({ head: 'Value', eqs: [intTex, T('diverges: the area is infinite')] });
+      if (Fs && finite) {
+        const Fc = compile(Fs, [v], P1(cx)), naive = Fc(b) - Fc(a);
+        if (isFinite(naive)) left.push({ head: 'A trap', eqs: [`F(${vl}) = ${toTex(Fs)}`, `F(${toTex(s.b)}) - F(${toTex(s.a)}) ${prettyEq(naive)}${T(' is wrong here:')}`, T('f blows up inside the interval,'), T('so the fundamental theorem does not apply')] });
+      }
+    }
     else {
-      left.push({ head: 'Value', eqs: [`${intTex} ${valTex}`, ...(identify(res.v, Math.max(1e-11 * Math.max(1, Math.abs(res.v)), res.err * 10)) && !Number.isInteger(res.v) ? [`\\approx ${+res.v.toPrecision(8)}`] : [])] });
+      const FT = Fs ? toTex(Fs) : '';
+      if (Fs && FT.length < 170) left.push({ head: 'Antiderivative', eqs: [`F(${vl}) = ${FT}`] });
+      left.push({ head: 'Value', eqs: [
+        ...(ftc !== null ? [`${intTex} = F(${toTex(s.b)}) - F(${toTex(s.a)})`, `${valTex}`] : [`${intTex} ${valTex}`]),
+        ...(irrationalForm(identify(best, bestTol)) ? [`\\approx ${+best.toPrecision(6)}`] : []),
+        ...(!Fs ? [T('no formula for the antiderivative; computed numerically')] : []),
+      ] });
       if (finite && hi > lo) {
         const avg = res.v / (b - a);
         left.push({ head: 'Average value', eqs: [`\\frac{1}{${toTex(s.b)} - ${toTex(s.a)}}\\int f\\,d${vl} ${prettyEq(avg)}`] });
@@ -471,7 +541,7 @@ const CALC_GENERATORS: Record<string, any> = {
     if (finite) {
       const mid = (n: number) => { const h = (b - a) / n; let sm = 0; for (let k = 0; k < n; k++) sm += f(a + (k + 0.5) * h); return sm * h; };
       right.push({ head: 'Midpoint sums', eqs: [4, 16, 64].map(n => `M_{${n}} ${prettyEq(mid(n))}`) });
-      if (!res.diverges) right.push({ head: 'Midpoint error', eqs: [T('shrinks to ¼ each time n doubles:'), `|M_n - I| \\le \\frac{(b-a)\\,h^2}{24} \\max|f''|`] });
+      if (!res.diverges) right.push({ head: 'Midpoint error', eqs: [T('shrinks to a quarter each time n doubles:'), `|M_n - I| \\le \\frac{(b-a)\\,h^2}{24} \\max|f''|`] });
     } else right.push({ head: 'Improper integral', eqs: [T(isFinite(lo) || isFinite(hi) ? 'one limit is infinite:' : 'both limits are infinite:'), `\\lim_{R \\to \\infty} \\int^{R} f\\,d${vl}`] });
     factsBlock(C, cx, left, right);
     return { title, detected };
@@ -481,12 +551,29 @@ const CALC_GENERATORS: Record<string, any> = {
   accum(s: Extract<CalcSpec, { kind: 'accum' }>, cx: Ctx, C: Code, tex: Map<string, string>) {
     const v = s.v, x = s.x, V_ = namer(v), X_ = namer(x), vl = symLabel(v, tex), xl = symLabel(x, tex);
     const f = compile(s.f, [v], P1(cx));
-    const a = evalNum(s.a, cx);
+    // a formula for the antiderivative, written in the page's variable
+    const Fs = antiderivative(s.f, v);
+    let Fx = Fs ? simplify(subst(Fs, { [v]: S(x) })) : null;
+    const Fxc = Fx ? compile(Fx, [x], P1(cx)) : null;
+    let a = evalNum(s.a, cx);
+    // indefinite integrals are drawn as the area from a convenient start: 0 when F is defined there, else 1
+    if (s.indefinite && Fxc && !(isFinite(Fxc(0)) && isFinite(f(0)))) a = [1, -1, 2].find(p => isFinite(Fxc(p)) && isFinite(f(p))) ?? 1;
+    // the area from A only exists on the stretch around A where f stays finite (indefinite integrals may jump a gap)
+    let lo = -Infinity, hi = Infinity;
+    if (!s.indefinite) {
+      const span = Math.max(10, Math.abs(a) * 2), step = span / 4000; const bad = (u: number) => !isFinite(f(u)) || Math.abs(f(u)) > 1e9;
+      for (let u = a + step; u < a + span; u += step) if (bad(u)) { hi = u - step; break; }
+      for (let u = a - step; u > a - span; u -= step) if (bad(u)) { lo = u + step; break; }
+    }
+    const inside = (u: number) => u >= lo && u <= hi;
+    const exact = Fxc && isFinite(Fxc(a)) ? (u: number) => (inside(u) ? Fxc(u) - Fxc(a) : NaN) : null;
+    if (exact) { const r = integrate(f, a, a + 0.7); if (!r.diverges && Math.abs(exact(a + 0.7) - r.v) > 1e-6 * Math.max(1, Math.abs(r.v))) Fx = null; }
+    const area = (u: number) => { if (exact && Fx) return exact(u); if (!inside(u)) return NaN; const r = integrate(f, a, u); return r.diverges ? NaN : r.v; };
     const trig = hasFn(s.f, TRIG, v);
     let [x0, x1] = cx.domains[x] ?? defaultXRange([f], trig);
     if (a < x0) x0 = a - (x1 - x0) * 0.1; if (a > x1) x1 = a + (x1 - x0) * 0.1;
     const fy: number[] = [], Fy: number[] = [];
-    for (let i = 0; i <= 160; i++) { const u = x0 + (x1 - x0) * i / 160; fy.push(f(u)); const r = integrate(f, a, u); Fy.push(r.diverges ? NaN : r.v); }
+    for (let i = 0; i <= 160; i++) { const u = x0 + (x1 - x0) * i / 160; fy.push(f(u)); Fy.push(area(u)); }
     if (!fy.some(isFinite)) throw new MathError('the integrand has no real values here');
     let [fa, fb] = nm.robustRange(fy); fa = Math.min(fa, 0); fb = Math.max(fb, 0);
     let [Fa, Fb] = Fy.some(isFinite) ? nm.robustRange(Fy, 0, 1) : [-1, 1]; Fa = Math.min(Fa, 0); Fb = Math.max(Fb, 0);
@@ -494,14 +581,20 @@ const CALC_GENERATORS: Record<string, any> = {
     const piT = trig && (x1 - x0) >= Math.PI;
     const Fname = s.indefinite ? 'F' : (s.fname.replace(/\(.*/, '') || 'F');
     const title = s.indefinite ? 'Indefinite integral' : 'Accumulation function';
-    const detected = s.indefinite ? 'antiderivative, drawn as the area from 0' : `area under f from ${prettyNum(a, false)} up to ${x}`;
+    const detected = s.indefinite ? (Fx ? 'antiderivative (indefinite integral)' : 'antiderivative, drawn as the area from 0') : `area under f from ${prettyNum(a, false)} up to ${x}`;
     header(C, cx, title, detected, 8);
     C.sec('the integrand and its running area');
     C.l(`f(${V_}) = ${code(s.f)}`);
     C.l(`A = ${nf(a)}`).l(`X0 = ${nf(x0)}`).l(`X1 = ${nf(x1)}`);
-    C.l('// area from A to u by Simpson\'s rule (n even)');
-    C.l('simpson(g, p, r, n) = (r - p) / (3 * n) * sum(map(range(0, n + 1), k => g(p + (r - p) * k / n) * (k == 0 || k == n ? 1 : (k % 2 == 1 ? 4 : 2))))');
-    C.l(`${Fname}(${X_}) = simpson(f, A, ${X_}, 60)`);
+    if (Fx) {
+      C.l(`Fanti(${X_}) = ${code(Fx)}   // an antiderivative: Fanti' = f`);
+      if (isFinite(lo) || isFinite(hi)) C.l(`${Fname}(${X_}) = ${[isFinite(lo) ? `${X_} < ${nf(lo)}` : '', isFinite(hi) ? `${X_} > ${nf(hi)}` : ''].filter(Boolean).join(' || ')} ? nan : Fanti(${X_}) - Fanti(A)   // the area from A to ${x} (only where f stays finite)`);
+      else C.l(`${Fname}(${X_}) = Fanti(${X_}) - Fanti(A)   // the area from A to ${x}`);
+    } else {
+      C.l('// no formula for the antiderivative: area from A to u by Simpson\'s rule (n even)');
+      C.l('simpson(g, p, r, n) = (r - p) / (3 * n) * sum(map(range(0, n + 1), k => g(p + (r - p) * k / n) * (k == 0 || k == n ? 1 : (k % 2 == 1 ? 4 : 2))))');
+      C.l(`${Fname}(${X_}) = simpson(f, A, ${X_}, 60)`);
+    }
     C.sec('left: the area builds up as the edge sweeps along (press play)');
     C.l(`P = frame2d((22, 150), (76, 92), (X0, X1), (${nf(y0)}, ${nf(y1)}), {xlabel: ${q(vl)}, ylabel: "f"${piT ? ', piTicks: true' : ''}})`);
     C.l(`Q = frame2d((114, 150), (76, 92), (X0, X1), (${nf(Y0)}, ${nf(Y1)}), {xlabel: ${q(xl)}, ylabel: ${q(Fname)}${piT ? ', piTicks: true' : ''}})`);
@@ -525,11 +618,14 @@ const CALC_GENERATORS: Record<string, any> = {
     C.l(`  tex(${q(`${Fname}(`)} + fmt(xe, 2) + ") = " + fmt(Fe, 3) + ${q(`,\\; ${Fname}' = f = `)} + fmt(f(xe), 3), (152, 145), {size: 8, color: "#555"})`);
     C.l('}');
     C.l(`tex("\\text{the slope of } ${Fname} \\text{ is the height of } f", (60, 145), {size: 8, color: "#555"})`);
-    const intTex = s.indefinite ? `\\int ${texOf(s.f)}\\,d${vl} = ${Fname}(${vl}) + C` : `${s.fname} = \\int_{${toTex(s.a)}}^{${xl}} ${texOf(s.f)}\\,d${vl}`;
-    const left: Fact[] = [{ head: s.indefinite ? 'Antiderivative' : 'Definition', eqs: [intTex, ...(s.indefinite ? [`${T('shown with ')} ${Fname}(${vl}) = \\int_0^{${vl}} ${texOf(s.f)}\\,d${vl}`] : [])] },
-      { head: 'Fundamental theorem', eqs: [`${Fname}'(${xl}) = f(${xl})`, `${Fname}(${prettyNum(a, false)}) = 0`] }];
+    const FxT = Fx ? toTex(Fx) : '';
+    const Gx = Fx && !s.indefinite ? simplify(sub(Fx, subst(Fx, { [x]: s.a }))) : null;
+    const left: Fact[] = s.indefinite
+      ? [{ head: 'Antiderivative', eqs: Fx && FxT.length < 170 ? [`\\int ${texOf(s.f)}\\,d${vl} = ${FxT} + C`, T(`drawn with C chosen so that ${Fname}(${prettyNum(a, false).replace(/\\/g, '')}) = 0`)] : [`\\int ${texOf(s.f)}\\,d${vl} = ${Fname}(${vl}) + C`, T('no formula found; drawn as ') + `\\int_{${prettyNum(a, false)}}^{${vl}} f`] }]
+      : [{ head: 'Definition', eqs: [`${s.fname} = \\int_{${toTex(s.a)}}^{${xl}} ${texOf(s.f)}\\,d${vl}`, ...(Gx && toTex(Gx).length < 160 ? [`= ${toTex(Gx)}`] : [])] }];
+    left.push({ head: 'Fundamental theorem', eqs: [`${Fname}'(${xl}) = f(${xl})`, `${Fname}(${prettyNum(a, false)}) = 0`] });
     const samples = [x0 + (x1 - x0) * 0.25, x0 + (x1 - x0) * 0.5, x0 + (x1 - x0) * 0.75, x1].map(u => +u.toPrecision(3));
-    const right: Fact[] = [{ head: 'Values', eqs: samples.map(u => { const r = integrate(f, a, u); return `${Fname}(${prettyNum(u, false)}) ${r.diverges ? '= \\infty' : prettyEq(r.v)}`; }) }];
+    const right: Fact[] = [{ head: 'Values', eqs: samples.map(u => { const r = area(u); return `${Fname}(${prettyNum(u, false)}) ${!isFinite(r) ? (inside(u) ? '= \\infty' : T(' undefined (past a blow-up of f)')) : prettyEq(r)}`; }) }];
     factsBlock(C, cx, left, right);
     return { title, detected };
   },
@@ -566,7 +662,7 @@ const CALC_GENERATORS: Record<string, any> = {
     if (seq) {
       C.l(`for k in 1..floor(X1) + 1 { y = f(k)\n  if isnan(y) == 0 && y >= Y0 && y <= Y1 { dot(Fr.map((k, y)), {r: 0.55, color: "${BLUE}"}) } }`);
     } else C.l(`fplot(Fr, f, {width: 0.5, color: "${BLUE}", n: 1500})`);
-    if (isFinite(L) && L >= y0 && L <= y1) C.l(`line(Fr.map((X0, L)), Fr.map((X1, L)), {dash: 1.2, width: 0.25, color: "${GREEN}"})`).l(`tex("L", Fr.map((X0, L)) + (-2, 1.6), {size: 9, color: "${GREEN}", anchor: "e"})`);
+    if (isFinite(L) && L >= y0 && L <= y1) C.l(`line(Fr.map((X0, L)), Fr.map((X1, L)), {dash: 1.2, width: 0.25, color: "${GREEN}"})`).l(`tex("L", Fr.map((X1, L)) + (-1, 1.8), {size: 9, color: "${GREEN}", anchor: "se"})`);
     C.sec('points close in on the limit (press play)');
     if (isFinite(a)) {
       C.l('d = (X1 - X0) * 0.45 * 0.5 ^ (t * 1.8)');
@@ -594,9 +690,49 @@ const CALC_GENERATORS: Record<string, any> = {
         table.push(parts.join(',\\; '));
       }
     } else for (const k of [1, 2, 4, 6]) { const u = (a > 0 ? 1 : -1) * 10 ** k; table.push(`f(${a > 0 ? '' : '-'}10^{${k}}) ${prettyEq(f(u))}`); }
+    const lh = res.kind !== 'none' ? lhopital(s.f, v, a, s.dir, cx, vl, toTex(s.to)) : null;   // only when it leads somewhere
     const left: Fact[] = [{ head: 'Result', eqs: res.kind === 'none' ? [limTex, T(`does not exist: ${res.why}`), ...(res.left !== undefined && res.right !== undefined ? [`${T('left: ')} ${prettyNum(res.left, false)},\\; ${T('right: ')} ${prettyNum(res.right, false)}`] : [])] : [`${limTex} ${verdict}`] }];
-    if (isFinite(a) && !s.dir) { const fa = f(a); left.push({ head: 'At the point itself', eqs: [isFinite(fa) ? `f(${prettyNum(a, false)}) ${prettyEq(fa)}` : T('f is undefined there — the limit only looks nearby')] }); }
+    if (lh) left.push({ head: 'L\'Hospital\'s rule', eqs: [...lh, verdict || T('(no finite limit)')] });
+    if (isFinite(a) && !s.dir && !lh) { const fa = f(a); left.push({ head: 'At the point itself', eqs: [isFinite(fa) ? `f(${prettyNum(a, false)}) ${prettyEq(fa)}` : T('f is undefined there — the limit only looks nearby')] }); }
     const right: Fact[] = [{ head: 'Values approaching', eqs: table }];
+    factsBlock(C, cx, left, right);
+    return { title, detected };
+  },
+
+  // ------------------------------------------------------------ Π_{n=n0}^∞ a_n
+  product(s: Extract<CalcSpec, { kind: 'product' }>, cx: Ctx, C: Code, tex: Map<string, string>) {
+    const i = s.i, I_ = namer(i), il = symLabel(i, tex);
+    const n0 = Math.round(evalNum(s.n0, cx));
+    const a = compile(s.f, [i], P1(cx));
+    const prodTex = `\\prod_{${il}=${n0}}^{\\infty} ${toTex(s.f, 2)}`;
+    const res = productOf(a, n0);
+    const L = res.kind === 'converges' ? res.v : NaN;
+    const NM = 40;
+    const Pp: number[] = []; let acc = 1; for (let k = 0; k <= NM; k++) { acc *= a(n0 + k); Pp.push(acc); }
+    const vals = [...Pp]; if (isFinite(L)) vals.push(L);
+    let [ya, yb] = nm.robustRange(vals.filter(isFinite), 0, 1); ya = Math.min(ya, 0); yb = Math.max(yb, 0);
+    const [y0, y1] = nm.niceRange(ya, yb, 0.1);
+    const title = res.kind === 'converges' ? 'Infinite product' : 'Infinite product (diverges)';
+    const detected = 'infinite product: partial products';
+    header(C, cx, title, detected, 8);
+    C.sec('the factors and the partial products');
+    C.l(`factor(${I_}) = ${code(s.f)}`).l(`N0 = ${n0}`).l(`NM = ${NM}`);
+    C.l('P(k) = prod(map(range(N0, N0 + k + 1), factor))   // product of the first k + 1 factors');
+    if (isFinite(L)) C.l(`L = ${nf(L)}   // the value (estimated numerically when the page was made)`);
+    C.sec('figure: dots are the partial products (press play)');
+    C.l(`Fr = frame2d((30, 134), (150, 110), (0, NM), (${nf(y0)}, ${nf(y1)}), {xlabel: "k", ylabel: "P_k"})`);
+    C.l('shown = min(NM, floor(1 + t / 8 * NM))');
+    C.l('for k in 0..shown + 1 {');
+    C.l(`  pk = P(k)`);
+    C.l(`  if isnan(pk) == 0 && pk >= ${nf(y0)} && pk <= ${nf(y1)} { dot(Fr.map((k, pk)), {r: 0.6, color: "${BLUE}"}) }`);
+    C.l('}');
+    if (isFinite(L) && L >= y0 && L <= y1) C.l(`line(Fr.map((0, L)), Fr.map((NM, L)), {dash: 1.2, width: 0.25, color: "${GREEN}"})`).l(`tex("L", Fr.map((NM, L)) + (-1, 1.8), {size: 9, color: "${GREEN}", anchor: "se"})`);
+    C.l(`tex("P_{" + str(shown) + "} = " + fmt(P(shown), 6)${isFinite(L) ? ' + ",\\quad L - P = " + fmt(L - P(shown), 6)' : ''}, (105, 127), {size: 9.5, color: "#555"})`);
+    const tol = res.kind === 'converges' ? Math.max(1e-11 * Math.max(1, Math.abs(L)), res.err * 3) : 1;
+    const left: Fact[] = [{ head: 'Verdict', eqs: res.kind === 'converges' ? [`${prodTex} ${shownEq(L, tol)}`, ...(irrationalForm(identify(L, tol)) ? [`\\approx ${+L.toPrecision(6)}`] : [])] : [prodTex, T(res.why)] }];
+    left.push({ head: 'Why logs help', eqs: [`\\ln \\prod a_{${il}} = \\sum \\ln a_{${il}}`, T('so the product converges when that series does')] });
+    const big = (n: number) => { let p = 1; for (let k = n0; k < n0 + n; k++) p *= a(k); return p; };
+    const right: Fact[] = [{ head: 'Partial products', eqs: [10, 100, 1000].map(n => `P_{${n}} ${prettyEq(big(n))}`) }];
     factsBlock(C, cx, left, right);
     return { title, detected };
   },
@@ -605,7 +741,7 @@ const CALC_GENERATORS: Record<string, any> = {
   series(s: Extract<CalcSpec, { kind: 'series' }>, cx: Ctx, C: Code, tex: Map<string, string>) {
     const i = s.i, I_ = namer(i), il = symLabel(i, tex);
     const n0 = Math.round(evalNum(s.n0, cx));
-    const sumTex = `\\sum_{${il}=${n0}}^{\\infty} ${texOf(s.f)}`;
+    const sumTex = `\\sum_{${il}=${n0}}^{\\infty} ${toTex(s.f, 2)}`;
     if (!s.x) {
       const a = compile(s.f, [i], P1(cx));
       const res = seriesSum(a, n0);
@@ -631,12 +767,17 @@ const CALC_GENERATORS: Record<string, any> = {
       C.l(`  sk = S(k)`);
       C.l(`  if isnan(sk) == 0 && sk >= ${nf(y0)} && sk <= ${nf(y1)} { dot(Fr.map((k, sk)), {r: 0.6, color: "${BLUE}"}) }`);
       C.l('}');
-      if (isFinite(L) && L >= y0 && L <= y1) C.l(`line(Fr.map((0, L)), Fr.map((NM, L)), {dash: 1.2, width: 0.25, color: "${GREEN}"})`).l(`tex("L", Fr.map((0, L)) + (-2, 1.6), {size: 9, color: "${GREEN}", anchor: "e"})`);
+      if (isFinite(L) && L >= y0 && L <= y1) C.l(`line(Fr.map((0, L)), Fr.map((NM, L)), {dash: 1.2, width: 0.25, color: "${GREEN}"})`).l(`tex("L", Fr.map((NM, L)) + (-1, 1.8), {size: 9, color: "${GREEN}", anchor: "se"})`);
       C.l(`tex("S_{" + str(shown) + "} = " + fmt(S(shown), 6)${isFinite(L) ? ' + ",\\quad L - S = " + fmt(L - S(shown), 6)' : ''}, (105, 127), {size: 9.5, color: "#555"})`);
       const big = (n: number) => { let sm = 0; for (let k = n0; k < n0 + n; k++) sm += a(k); return sm; };
-      const r1 = Math.abs(a(n0 + 1001) / a(n0 + 1000));
-      const left: Fact[] = [{ head: 'Verdict', eqs: res.kind === 'converges' ? [`${sumTex} ${shownEq(L, Math.max(1e-11 * Math.max(1, Math.abs(L)), res.err * 3))}`, ...(identify(L, Math.max(1e-11 * Math.max(1, Math.abs(L)), res.err * 3)) && !Number.isInteger(L) ? [`\\approx ${+L.toPrecision(8)}`] : [])] : [sumTex, T('diverges: ' + res.why)] }];
-      left.push({ head: 'Ratio test', eqs: [isFinite(r1) ? `\\left|\\frac{a_{n+1}}{a_n}\\right| \\to ${prettyNum(+r1.toPrecision(3), false)}${r1 < 0.999 ? T(' < 1, converges') : Math.abs(r1 - 1) < 0.01 ? T(' = 1: inconclusive') : T(' > 1, diverges')}` : T('not applicable')] });
+      // |a(n+1)/a(n)| sampled at n and 2n, extrapolated (it often creeps towards its limit like 1 − c/n)
+      const qr = (n: number) => Math.abs(a(n0 + n + 1) / a(n0 + n));
+      const q1 = qr(1000), q2 = qr(2000);
+      let r1 = isFinite(q1) && isFinite(q2) ? 2 * q2 - q1 : isFinite(q1) ? q1 : NaN;
+      if (!isFinite(r1) || r1 < 0) { const qs = [10, 20, 40, 80].map(qr).filter(isFinite); r1 = qs.length ? qs[qs.length - 1] : NaN; if (qs.length >= 3 && qs.every((q, i) => i === 0 || q < qs[i - 1] * 0.7)) r1 = 0; }
+      if (Math.abs(r1 - 1) < 2e-3) r1 = 1;
+      const left: Fact[] = [{ head: 'Verdict', eqs: res.kind === 'converges' ? [`${sumTex} ${shownEq(L, Math.max(1e-11 * Math.max(1, Math.abs(L)), res.err * 3))}`, ...(irrationalForm(identify(L, Math.max(1e-11 * Math.max(1, Math.abs(L)), res.err * 3))) ? [`\\approx ${+L.toPrecision(6)}`] : [])] : [sumTex, T('diverges: ' + res.why)] }];
+      left.push({ head: 'Ratio test', eqs: [isFinite(r1) ? `\\left|\\frac{a_{n+1}}{a_n}\\right| \\to ${prettyNum(+r1.toPrecision(3), false)}${r1 < 0.998 ? T(' < 1, converges') : Math.abs(r1 - 1) < 0.01 ? T(' = 1: inconclusive') : T(' > 1, diverges')}` : T('not applicable')] });
       const right: Fact[] = [{ head: 'Partial sums', eqs: [10, 100, 1000].map(n => `S_{${n}} ${prettyEq(big(n))}`) }];
       factsBlock(C, cx, left, right);
       return { title, detected };

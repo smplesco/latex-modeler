@@ -1,5 +1,8 @@
 // npm test — runs the auto-modeller over a corpus of LaTeX inputs and executes every generated page.
 import { autoModel, MODEL_EXAMPLES } from '../src/model/generate';
+import { antiderivative } from '../src/model/antideriv';
+import { parseLatex } from '../src/model/latex';
+import { compile, tryDiff, freeSyms } from '../src/model/sym';
 import { runProgram } from '../src/lang/interp';
 import { readFileSync, readdirSync } from 'node:fs';
 
@@ -51,10 +54,13 @@ for (const input of ['e^{i\\pi}', '\\int_0^1 x^2', '\\iint_D x\\,dA', '\\lim x',
 const CALC: [string, string, string][] = [
   ['\\int_0^1 x^2\\,dx', 'integral', '\\frac{1}{3}'], ['\\int_0^{\\pi} \\sin x\\,dx', 'integral', '= 2'], ['\\int_{-\\infty}^{\\infty} e^{-x^2}\\,dx', 'integral', '\\sqrt{\\pi}'],
   ['\\int_0^1 \\frac{dx}{\\sqrt{x}}', 'integral', '= 2'], ['\\int_1^{\\infty} \\frac{1}{x}\\,dx', 'integral', 'diverges'], ['\\int_{-\\infty}^{\\infty} \\frac{1}{1+x^2}\\,dx', 'integral', '\\pi'],
-  ['F(x) = \\int_0^x \\cos(t^2)\\,dt', 'accum', "F'(x) = f(x)"], ['\\int x e^{-x}\\,dx', 'accum', 'F(x) + C'],
+  ['F(x) = \\int_0^x \\cos(t^2)\\,dt', 'accum', "F'(x) = f(x)"], ['\\int x e^{-x}\\,dx', 'accum', '-x e^{-x} - e^{-x} + C'], ['\\int_0^1 x e^x\\,dx', 'integral', '= 1'], ['\\int_{-1}^{1} \\frac{1}{x^2}\\,dx', 'integral', 'is wrong here'], ['F(x) = \\int_1^x \\frac{1}{t}\\,dt', 'accum', '= \\ln \\left|x\\right|'], ['\\int_0^1 \\frac{1}{1+x^2}\\,dx', 'integral', 'F(x) = \\arctan x'],
   ['\\lim_{x \\to 0} \\frac{\\sin x}{x}', 'limit', '= 1'], ['\\lim_{n \\to \\infty} \\left(1 + \\frac{1}{n}\\right)^n', 'limit', '= e'], ['\\lim_{x \\to 0^+} x \\ln x', 'limit', '= 0'],
   ['\\lim_{x \\to 0} \\frac{|x|}{x}', 'limit', 'does not exist'], ['\\lim_{x \\to \\infty} \\frac{3x^2+1}{x^2-5}', 'limit', '= 3'], ['\\lim_{x \\to 0} \\frac{1}{x^2}', 'limit', '\\infty'],
-  ['\\lim_{x \\to 0} \\frac{1 - \\cos x}{x^2}', 'limit', '\\frac{1}{2}'], ['\\lim_{x \\to 0} \\frac{\\sin x - x}{x^3}', 'limit', '-\\frac{1}{6}'], ['\\lim_{x \\to 0} \\sin\\frac{1}{x}', 'limit', 'does not exist'],
+  ['\\lim_{x \\to 0} \\frac{1 - \\cos x}{x^2}', 'limit', '\\frac{1}{2}'],
+  ['\\lim_{x \\to \\infty} \\frac{x^2}{e^x}', 'limit', '\\frac{2}{e^{x}}'], ['\\lim_{x \\to \\infty} \\frac{\\ln x}{x}', 'limit', 'differentiate top and bottom'],
+  ['\\prod_{n=1}^{\\infty} \\frac{4n^2}{4n^2-1}', 'product', '\\frac{\\pi}{2}'], ['\\prod_{n=2}^{\\infty} \\left(1 - \\frac{1}{n^2}\\right)', 'product', '= \\frac{1}{2}'], ['\\prod_{n=1}^{\\infty} \\left(1 + \\frac{1}{n}\\right)', 'product', 'grow without bound'],
+  ['\\sum_{n=1}^{\\infty} \\left(\\frac{1}{n} - \\frac{1}{n+1}\\right)', 'series', 'inconclusive'], ['\\int_0^{\\pi/2} \\sin^2 x\\,dx', 'integral', 'F(x) = \\frac{x}{2} - \\frac{\\sin 2 x}{4}'], ['\\lim_{x \\to 0} \\frac{\\sin x - x}{x^3}', 'limit', '-\\frac{1}{6}'], ['\\lim_{x \\to 0} \\sin\\frac{1}{x}', 'limit', 'does not exist'],
   ['\\sum_{n=1}^{\\infty} \\frac{1}{n^2}', 'series', '\\frac{\\pi^2}{6}'], ['\\sum_{n=1}^{\\infty} \\frac{1}{n}', 'series', 'diverges'], ['\\sum_{n=0}^{\\infty} \\frac{(-1)^n}{2n+1}', 'series', '\\frac{\\pi}{4}'],
   ['\\sum_{n=1}^{\\infty} \\frac{1}{n^4}', 'series', '\\frac{\\pi^4}{90}'], ['\\sum_{n=0}^{\\infty} \\frac{x^n}{n!}', 'series', 'R = \\infty'], ['\\sum_{n=1}^{\\infty} \\frac{x^n}{n}', 'series', 'R = 1'],
 ];
@@ -66,6 +72,21 @@ for (const [input, kind, want] of CALC) {
   if (r.kind !== kind || !r.code!.includes(want)) { fail++; console.log(`✗ calculus  ${input}: kind ${r.kind}, expected "${want}" on the page`); }
   else console.log(`✓ calculus  ${kind.padEnd(9)} ${input.padEnd(44)} ${want}`);
 }
+// symbolic integration: every antiderivative must differentiate back to the integrand
+const ANTI = ['x^2', '3x^2 - 2x + 5', '\\frac{1}{x}', '\\sqrt{x}', 'x^{-3/2}', 'e^{2x+1}', '2^x', '\\cos(3x)', '\\tan x', '\\sec^2 x', '\\frac{1}{1+x^2}', '\\frac{1}{\\sqrt{1-x^2}}',
+  '\\ln x', 'x^5 e^x', 'x^2 \\cos x', 'x \\ln x', 'e^x \\sin x', 'e^{2x}\\cos(3x)', '\\arctan x', '2x\\cos(x^2)', 'x e^{x^2}', '\\frac{x}{x^2+1}', '\\frac{\\ln x}{x}', '\\sin^2 x', '\\sin^3 x',
+  '\\sin^2 x \\cos^2 x', '\\cos^4 x', '\\frac{1}{x^2-1}', '\\frac{x+1}{x^2+2x+5}', '\\frac{1}{x^3+1}', '\\frac{x^3}{x^2+1}', '\\sqrt{1-x^2}', '\\sqrt{x^2+1}', '\\frac{1}{\\sqrt{x^2+4}}',
+  'x(x^2+1)^3', '\\frac{e^x}{1+e^x}', '\\tan^2 x', 'x\\cosh x', '\\frac{1}{x \\ln x}', 'a x^2 + b'];
+for (const src of ANTI) {
+  n++;
+  const f = parseLatex(src)[0]; const F = antiderivative(f, 'x');
+  if (!F) { fail++; console.log(`✗ integral  ${src}: no antiderivative found`); continue; }
+  const dF = tryDiff(F, 'x')!; const ps = Object.fromEntries([...freeSyms(f)].filter(v => v !== 'x').map((v, i) => [v, 1.5 + i]));
+  const g = compile(f, ['x'], ps), h = compile(dF, ['x'], ps);
+  const bad = [0.4, 1.3, 2.2].some(t => isFinite(g(t)) && Math.abs(g(t) - h(t)) > 1e-7 * Math.max(1, Math.abs(g(t))));
+  if (bad) { fail++; console.log(`✗ integral  ${src}: derivative does not match`); } else console.log(`✓ integral  ${src}`);
+}
+for (const src of ['e^{-x^2}', '\\frac{\\sin x}{x}', '\\cos(x^2)']) { n++; if (antiderivative(parseLatex(src)[0], 'x')) { fail++; console.log(`✗ integral  ${src}: claimed an elementary antiderivative`); } else console.log(`✓ no elementary antiderivative: ${src}`); }
 // the hand-written examples must run too
 for (const f of readdirSync('src/examples').filter(f => f.endsWith('.bd'))) {
   n++;

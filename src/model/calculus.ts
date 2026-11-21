@@ -118,6 +118,24 @@ export function seriesSum(a: F1, n0: number): SeriesResult {
   return { kind: 'converges', v, err };
 }
 
+/** numeric verdict on Π_{n=n0}^∞ a(n), through Σ ln a(n) when the factors are positive */
+export function productOf(a: F1, n0: number): SeriesResult {
+  let zero = false, neg = 0;
+  for (let n = n0; n < n0 + 2000; n++) { const v = a(n); if (!isFinite(v)) return { kind: 'diverges', why: `factor ${n} is undefined` }; if (v === 0) zero = true; if (v < 0) neg++; }
+  if (zero) return { kind: 'converges', v: 0, err: 0 };
+  if (neg > 0) {
+    // only finitely many negative factors are allowed: they just set the sign
+    for (let n = n0 + 2000; n < n0 + 16000; n++) if (a(n) < 0) return { kind: 'diverges', why: 'infinitely many negative factors: the sign keeps flipping' };
+  }
+  const sign = neg % 2 ? -1 : 1;
+  const r = seriesSum(n => Math.log(Math.abs(a(n))), n0);
+  if (r.kind === 'diverges') {
+    const s = Array.from({ length: 4000 }, (_, k) => Math.log(Math.abs(a(n0 + k)))).reduce((p, q) => p + q, 0);
+    return s < 0 ? { kind: 'converges', v: 0, err: 0 } : { kind: 'diverges', why: 'the partial products grow without bound' };
+  }
+  const v = sign * Math.exp(r.v); return { kind: 'converges', v, err: Math.abs(v) * r.err };
+}
+
 // ---------------------------------------------------------------- recognising closed forms
 const CONSTS: [number, string][] = [
   [1, ''], [Math.PI, '\\pi'], [Math.PI ** 2, '\\pi^2'], [Math.PI ** 3, '\\pi^3'], [Math.PI ** 4, '\\pi^4'], [Math.sqrt(Math.PI), '\\sqrt{\\pi}'],

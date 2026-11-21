@@ -188,6 +188,9 @@ export function simplify(n: Node, depth = 0): Node {
       const fs: Node[] = [];
       const push = (x: Node) => { if (x.k === 'mul') x.a.forEach(push); else fs.push(x); };
       n.a.map(s).forEach(push);
+      // e^a · e^b = e^(a+b)
+      const exps = fs.filter(f => f.k === 'fn' && f.f === 'exp');
+      if (exps.length > 1) return s({ k: 'mul', a: [...fs.filter(f => !(f.k === 'fn' && f.f === 'exp')), fn('exp', add(...exps.map(e => (e as any).a[0])))] });
       let c = 1; const bases = new Map<string, { b: Node; e: Node[] }>(); const order: string[] = [];
       for (const f of fs) {
         if (f.k === 'num') { c *= f.v; continue; }
@@ -329,7 +332,7 @@ export function rational(v: number, maxDen = 16): [number, number] | null {
 }
 function numTex(v: number): string {
   if (!isFinite(v)) return v > 0 ? '\\infty' : v < 0 ? '-\\infty' : '\\text{NaN}';
-  const r = rational(v, 12);
+  const r = rational(v, 40);
   if (r) { const [p, q] = r; if (q === 1) return String(p); return (p < 0 ? '-' : '') + `\\frac{${Math.abs(p)}}{${q}}`; }
   const a = Math.abs(v);
   let s = a >= 1e5 || a < 1e-3 ? (() => { const e = Math.floor(Math.log10(a)); return `${+(v / 10 ** e).toPrecision(4)}\\times 10^{${e}}`; })() : String(+v.toPrecision(5));
@@ -388,7 +391,7 @@ export function toTex(n: Node, prec = 0): string {
         else if (f.k === 'pow' && f.e.k === 'num' && f.e.v < 0) denF.push(simpPow(f.b, N(-f.e.v), 0));
         else numF.push(f);
       }
-      const r = rational(c, 12) ?? [c, 1];
+      const r = rational(c, 40) ?? [c, 1];
       let [p, q] = r;
       const joinF = (fs: Node[], lead: number) => {
         const parts: string[] = []; if (lead !== 1 || fs.length === 0) parts.push(numTex(lead));
@@ -409,7 +412,7 @@ export function toTex(n: Node, prec = 0): string {
       if (e.k === 'num') {
         if (Math.abs(e.v - 0.5) < 1e-12) return `\\sqrt{${toTex(b)}}`;
         if (Math.abs(e.v - 1 / 3) < 1e-12) return `\\sqrt[3]{${toTex(b)}}`;
-        if (e.v < 0) return wrap(`\\frac{1}{${toTex(simpPow(b, N(-e.v), 0), 2)}}`, 2);
+        if (e.v < 0) return wrap(`\\frac{1}{${toTex(simpPow(b, N(-e.v), 0))}}`, 2);   // a denominator needs no brackets
         if (b.k === 'fn' && Number.isInteger(e.v) && e.v > 0 && FN_TEX[b.f] && !['ln', 'log10', 'log2', 'gamma', 'max', 'min', 'det'].includes(b.f) && !b.f.startsWith('a')) {
           const arg = b.a[0];
           return wrap(`${FN_TEX[b.f]}^{${e.v}}${atomic(arg) ? ' ' + toTex(arg, 3) : `\\left(${toTex(arg)}\\right)`}`, 2);

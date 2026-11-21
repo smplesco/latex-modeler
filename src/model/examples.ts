@@ -35,4 +35,6 @@ export const MODEL_EXAMPLES: { label: string; tex: string }[] = [
   { label: 'limit: e', tex: '\\lim_{n \\to \\infty} \\left(1 + \\frac{1}{n}\\right)^n' },
   { label: 'Basel series', tex: '\\sum_{n=1}^{\\infty} \\frac{1}{n^2}' },
   { label: 'power series of eˣ', tex: '\\sum_{n=0}^{\\infty} \\frac{x^n}{n!}' },
+  { label: 'antiderivative by parts', tex: '\\int x^2 e^x\\,dx' },
+  { label: 'Wallis product', tex: '\\prod_{n=1}^{\\infty} \\frac{4n^2}{4n^2-1}' },
 ];

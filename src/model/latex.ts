@@ -382,7 +382,6 @@ class LP {
           } else if (this.is('op', '^')) { this.next(); hi = this.scriptArg(); }
         }
         if (!lo || !hi) this.err(`\\${name} needs both bounds, like \\${name}_{n=1}^{10}`);
-        if (name === 'prod' && hi!.k === 'num' && !isFinite(hi!.v)) this.err('infinite products are not supported — use a finite upper bound (e.g. 50)');
         const body = this.term(true);
         return { k: 'sum', i, lo: lo!, hi: hi!, body, prod: name === 'prod' };
       }
