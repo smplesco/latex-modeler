@@ -11,13 +11,21 @@ import { runProgram, tweakables, RunCtx } from '../lang/interp';
 import { Vec, isObj, truthy } from '../lang/values';
 import { contourLines } from '../geom/marching';
 import { injectExplorerCSS } from './explorer.css';
+import type { ExploreTarget } from './chips';
 
 const HQ: Record<string, number> = { splot: 110, psurf: 110, isoplot: 48, pplot: 3000, fplot: 2400, cplot: 380, region: 320 };
 const RANGE_CONSTS = /^[XYZTUV][01]$/;
 const C = { red: '#d64545', green: '#2e9e5b', blue: '#1f6fd1', orange: '#e08a1e', purple: '#8a4fd6', grey: '#8a939d' };
 export const fmtNum = (v: number) => (!isFinite(v) ? (Number.isNaN(v) ? 'undefined' : v > 0 ? '∞' : '−∞')
   : Math.abs(v) < 1e-12 ? '0' : (Math.abs(v) >= 1e5 || Math.abs(v) < 1e-3) ? v.toExponential(3) : String(+v.toPrecision(5)));
+const TOUCH = typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches;
 const sg = (v: number) => (v < 0 ? ' − ' : ' + ') + fmtNum(Math.abs(v));
+const inv3 = (m: number[][]) => {
+  const [a, b, c] = m[0], [d, e, f] = m[1], [g, h, i] = m[2];
+  const A = e * i - f * h, B = -(d * i - f * g), Cc = d * h - e * g, det = a * A + b * B + c * Cc;
+  return [[A / det, -(b * i - c * h) / det, (b * f - c * e) / det], [B / det, (a * i - c * g) / det, -(a * f - c * d) / det], [Cc / det, -(a * h - b * g) / det, (a * e - b * d) / det]];
+};
+const mv = (m: number[][], v: number[]) => [0, 1, 2].map(r => m[r][0] * v[0] + m[r][1] * v[1] + m[r][2] * v[2]);
 const F3 = (p: number[]) => `(${p.map(fmtNum).join(', ')})`;
 
 export interface ExplorerHost {
@@ -85,13 +93,17 @@ class Overlay {
       v.copy(l.p).project(cam);
       const off = v.z > 1 || v.z < -1;
       l.el.style.display = off ? 'none' : '';
-      l.el.style.left = ((v.x + 1) / 2 * r.width) + 'px'; l.el.style.top = ((1 - v.y) / 2 * r.height) + 'px';
+      const x = (v.x + 1) / 2 * r.width, w = l.el.offsetWidth;
+      // flip to the left of the point when the label would run off the right edge
+      l.el.style.left = (x + 8 + w > r.width - 4 ? Math.max(4, x - w - 8) - 8 : x) + 'px'; l.el.style.top = ((1 - v.y) / 2 * r.height) + 'px';
     }
   }
 }
 
 export class Explorer {
   el: HTMLElement; gl!: HTMLElement; viewer: Viewer | null = null; ov!: Overlay; pins!: Overlay;
+  fig: number | null = null; FT: { c: number[]; k: number; o: number[]; s: number; R: number[][]; Ri: number[][] } | null = null;
+  touchProbe: { x: number; y: number } | null = null;
   idx = 0; ctx: RunCtx | null = null; EF: any = null; T: any = null; dim = 3; R: number[][] | null = null;
   ranges: number[] | null = null; equal: boolean | null = null; overrides: Record<string, number> = {};
   tools: Record<string, boolean> = { sections: true, plane: false, gradient: true, wire: true, box: true, normal: true, slice: true, tangent: true, velocity: true, guides: true };
@@ -124,10 +136,11 @@ export class Explorer {
         <div class="xp-gl"><div class="xp-labels"></div><div class="xp-hint"></div></div>
         <aside class="xp-side">
           <h5>Readout</h5><pre class="xp-read"></pre>
-          <h5>Show</h5><div class="xp-tools"></div>
-          <h5>Range</h5><div class="xp-range"></div>
+          <div class="xp-row xp-tpin" style="display:none"><button class="xp-b on" data-a="tpin">📌 Pin this point</button></div>
+          <h5 class="xp-hshow">Show</h5><div class="xp-tools"></div>
+          <h5 class="xp-hrange">Range</h5><div class="xp-range"></div>
           <h5 class="xp-ph">Parameters</h5><div class="xp-params"></div>
-          <h5>Pins <span style="text-transform:none;letter-spacing:0;font-weight:400">— click the figure to pin a point</span></h5>
+          <h5>Pins <span style="text-transform:none;letter-spacing:0;font-weight:400">— ${TOUCH ? "tap a point, then Pin" : "click the figure to pin a point"}</span></h5>
           <div class="xp-pins"><span class="xp-empty">no pins yet</span></div>
           <div class="xp-row"><button class="xp-b" data-a="copypins">Copy</button><button class="xp-b" data-a="clearpins">Clear</button></div>
         </aside>
@@ -141,8 +154,10 @@ export class Explorer {
   }
 
   // ---------------------------------------------------------------- lifecycle
-  open(index: number) {
-    this.idx = index; this.ranges = null; this.equal = null; this.overrides = {}; this.pinData = []; this.lastProbe = null;
+  open(index: number) { this.openTarget({ frame: index }); }
+  openTarget(t: ExploreTarget) {
+    if ('fig' in t) { this.fig = t.fig; this.idx = -1; } else { this.fig = null; this.idx = t.frame; }
+    this.T = null; this.ranges = null; this.equal = null; this.overrides = {}; this.pinData = []; this.lastProbe = null;
     this.t = this.host.time(); this.playing = false;
     this.el.classList.add('show'); this.isOpen = true;
     if (!this.viewer) this.initViewer();
@@ -166,13 +181,29 @@ export class Explorer {
     const labels = this.q('.xp-labels');
     this.ov = new Overlay(v, labels); this.pins = new Overlay(v, labels);
     const cv = v.renderer.domElement;
-    let down: { x: number; y: number; t: number; rx?: number[] } | null = null;
+    let down: { x: number; y: number; t: number; rx?: number[]; touch: boolean } | null = null;
+    const ptrs = new Map<number, { x: number; y: number }>(); let pinch: { d: number; mid: number[]; r: number[] } | null = null;
+    cv.style.touchAction = 'none';
     cv.addEventListener('pointerdown', e => {
-      down = { x: e.clientX, y: e.clientY, t: performance.now(), rx: this.ranges ? [...this.ranges] : this.curRanges() };
-      if (this.dim === 2) { cv.setPointerCapture(e.pointerId); this.gl.classList.add('dragging'); }
+      ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (ptrs.size === 2 && this.dim === 2) {               // two fingers: pinch-zoom the data window
+        const [a, b] = [...ptrs.values()];
+        pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), mid: this.EF._inv(this.screenToWorld((a.x + b.x) / 2, (a.y + b.y) / 2).toArray()), r: this.ranges ?? this.curRanges() };
+        down = null; return;
+      }
+      down = { x: e.clientX, y: e.clientY, t: performance.now(), rx: this.ranges ? [...this.ranges] : this.curRanges(), touch: e.pointerType !== 'mouse' };
+      if (this.dim === 2) { try { cv.setPointerCapture(e.pointerId); } catch { /* pointer already gone */ } this.gl.classList.add('dragging'); }
     });
+    const lift = (e: PointerEvent) => { ptrs.delete(e.pointerId); if (ptrs.size < 2 && pinch) { pinch = null; this.schedule(); } };
+    cv.addEventListener('pointercancel', e => { lift(e); down = null; this.gl.classList.remove('dragging'); });
     cv.addEventListener('pointermove', e => {
-      this.lastMouse = { x: e.clientX, y: e.clientY };
+      if (ptrs.has(e.pointerId)) ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pinch && ptrs.size >= 2) {
+        const [a, b] = [...ptrs.values()]; const f = pinch.d / Math.max(10, Math.hypot(a.x - b.x, a.y - b.y)); const m = pinch.mid, r = pinch.r;
+        this.ranges = [m[0] + (r[0] - m[0]) * f, m[0] + (r[1] - m[0]) * f, m[1] + (r[2] - m[1]) * f, m[1] + (r[3] - m[1]) * f];
+        this.schedule(); return;
+      }
+      if (e.pointerType === 'mouse') this.lastMouse = { x: e.clientX, y: e.clientY };
       if (this.dim === 2 && down && e.buttons) {                 // pan the data window
         const r = cv.getBoundingClientRect(); const w = this.screenToWorld(e.clientX, e.clientY), w0 = this.screenToWorld(down.x, down.y);
         const dx = (w.x - w0.x) / this.EF._sx, dy = (w.y - w0.y) / this.EF._sy; void r;
@@ -183,12 +214,14 @@ export class Explorer {
       this.queueProbe();
     });
     cv.addEventListener('pointerup', e => {
-      this.gl.classList.remove('dragging');
-      if (!down) return; const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y); const dt = performance.now() - down.t; down = null;
-      if (moved < 5 && dt < 600) this.pin(e.clientX, e.clientY);
-      else if (this.dim === 2) this.schedule();
+      lift(e); this.gl.classList.remove('dragging');
+      if (!down) return; const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y); const dt = performance.now() - down.t; const touch = down.touch; down = null;
+      if (moved < (touch ? 12 : 5) && dt < 600) {
+        if (touch) { this.touchProbe = { x: e.clientX, y: e.clientY }; this.probe(e.clientX, e.clientY); this.showTouchPin(); }  // no hover on touchscreens: a tap reads
+        else this.pin(e.clientX, e.clientY);
+      } else if (this.dim === 2) this.schedule();
     });
-    cv.addEventListener('pointerleave', () => { this.ov.clear(); this.read(this.idleText()); });
+    cv.addEventListener('pointerleave', e => { if (e.pointerType !== 'mouse') return; this.ov.clear(); this.read(this.idleText()); });
     cv.addEventListener('wheel', e => {
       if (this.dim !== 2) return;
       e.preventDefault();
@@ -218,8 +251,10 @@ export class Explorer {
     let ctx: RunCtx;
     try { ctx = runProgram(src, this.t, { measure: this.host.measure, overrides: this.overrides }); }
     catch (e: any) { this.read(`The page has an error, fix it first:\n${e.message}${e.line ? ` (line ${e.line})` : ''}`); return; }
+    if (this.fig !== null) { this.rebuildFree(ctx, resetCam || !this.T); return; }
     const T = ctx.frames[this.idx];
     if (!T) { this.read('This figure no longer exists on the page.'); return; }
+    this.showFrameUI(true);
     const firstTime = !this.T || this.T.dim !== T.dim || resetCam;
     this.T = T; this.dim = T.dim; this.ctx = ctx; this.usesT = ctx.usesT; this.duration = ctx.duration ?? 6;
     const PF = T.F; const opts0 = (T.args[T.dim === 2 ? 4 : 5] ?? {}) as any;
@@ -270,8 +305,8 @@ export class Explorer {
     this.q<HTMLInputElement>('.xp-t').max = String(this.duration); this.updT();
     this.gl.classList.toggle('flat', T.dim === 2);
     this.q('.xp-hint').innerHTML = T.dim === 3
-      ? 'drag to turn · right-drag to pan · scroll to zoom<br>hover the figure to probe it · click to pin a point'
-      : 'drag to pan · scroll to zoom (curves are re-computed)<br>hover to read values · click to pin' + (kinds.includes('slopefield') ? ' (or draw a solution)' : '');
+      ? (TOUCH ? 'drag to turn · pinch to zoom · two-finger drag to pan<br>tap the figure to probe it' : 'drag to turn · right-drag to pan · scroll to zoom<br>hover the figure to probe it · click to pin a point')
+      : (TOUCH ? 'drag to pan · pinch to zoom (curves are re-computed)<br>tap to read values' : 'drag to pan · scroll to zoom (curves are re-computed)<br>hover to read values · click to pin') + (kinds.includes('slopefield') ? ' (or draw a solution)' : '');
     if (firstTime) { this.buildTools(kinds); }
     this.fillRanges(r);
     this.refreshPins();
@@ -319,6 +354,7 @@ export class Explorer {
       case 'play': this.playing = !this.playing; this.q('[data-a=play]').textContent = this.playing ? '❚❚' : '▶'; if (!this.playing) this.schedule(); break;
       case 'reset': this.ranges = null; this.equal = null; this.overrides = {}; this.buildParams(); this.rebuild(true, true); break;
       case 'snap': { const url = v!.snapshotView(); if (this.host.snapshot) this.host.snapshot(url, 'figure-' + (this.idx + 1) + '.png'); else window.open(url); break; }
+      case 'tpin': if (this.lastProbe) { this.pinData.push({ kind: 'pt', p: this.lastProbe.p, text: this.lastProbe.text }); this.refreshPins(); } (this.q('.xp-tpin') as HTMLElement).style.display = 'none'; break;
       case 'clearpins': this.pinData = []; this.refreshPins(); break;
       case 'copypins': navigator.clipboard?.writeText(this.pinText()).catch(() => {}); break;
     }
@@ -327,6 +363,7 @@ export class Explorer {
   private updT() { this.q('.xp-tv').textContent = 't = ' + this.t.toFixed(2); this.q<HTMLInputElement>('.xp-t').value = String(this.t); }
   private read(s: string) { this.q('.xp-read').textContent = s; }
   private idleText() {
+    if (this.fig !== null) return 'Hover (or tap) the drawing to read the coordinates of its points.';
     if (!this.ctx || !this.T) return '';
     return this.dim === 3 ? 'Hover a surface or curve to probe it.' : 'Hover the graph to read values.';
   }
@@ -407,6 +444,7 @@ export class Explorer {
   private hooksOf(name: string) { return this.ctx!.hooks.map((h, i) => ({ ...h, i })).filter(h => h.frame === this.T.id && h.name === name); }
 
   private probe(cx: number, cy: number) {
+    if (this.fig !== null) return this.probeFree(cx, cy);
     if (!this.viewer || !this.ctx || !this.EF) return;
     this.ov.clear(); this.lastProbe = null;
     const v = this.viewer;
@@ -581,8 +619,78 @@ export class Explorer {
     this.read(lines.join('\n'));
   }
 
+  private showTouchPin() { (this.q('.xp-tpin') as HTMLElement).style.display = this.lastProbe ? '' : 'none'; }
+  private showFrameUI(on: boolean) {
+    for (const s of ['.xp-hshow', '.xp-tools', '.xp-hrange', '.xp-range']) (this.q(s) as HTMLElement).style.display = on ? '' : 'none';
+  }
+
+  // ---------------------------------------------------------------- hand-drawn 3D figures (onpage projectors)
+  private modelToWorld(q: number[]) {
+    const F = this.FT!; const pg = mv(F.R, q).map((x, i) => F.o[i] + F.s * x);
+    return [100 + (pg[0] - F.c[0]) * F.k, 80 + (pg[1] - F.c[1]) * F.k, (pg[2] - F.c[2]) * F.k];
+  }
+  private worldToModel(w: number[]) {
+    const F = this.FT!; const pg = [F.c[0] + (w[0] - 100) / F.k, F.c[1] + (w[1] - 80) / F.k, F.c[2] + w[2] / F.k];
+    return mv(F.Ri, pg.map((x, i) => (x - F.o[i]) / F.s));
+  }
+  private rebuildFree(ctx: RunCtx, resetCam: boolean) {
+    const v = this.viewer!; const meta = ctx.figMeta?.[this.fig!];
+    const mine = ctx.prims.filter(p => p.fig === this.fig);
+    if (!meta?.free || !mine.length) { this.read('This drawing no longer exists on the page.'); return; }
+    const prims = JSON.parse(JSON.stringify(mine));
+    // fit the drawing into the explorer's 112 mm working space, centred
+    let lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+    const each = (f: (q: number[]) => number[] | void) => {
+      for (const p of prims) {
+        const arrs: number[][] = p.pts ? p.pts : p.kind === 'arrow' ? [p.a, p.b] : p.kind === 'dot' ? [p.p] : p.kind === 'tex' ? [p.pos] : [];
+        for (const q of arrs) { const r = f(q); if (r) { q[0] = r[0]; q[1] = r[1]; q[2] = r[2]; } }
+        if (p.pos && (p.kind === 'trimesh' || p.kind === 'segs')) for (let i = 0; i + 2 < p.pos.length; i += 3) { const r = f([p.pos[i], p.pos[i + 1], p.pos[i + 2]]); if (r) { p.pos[i] = r[0]; p.pos[i + 1] = r[1]; p.pos[i + 2] = r[2]; } }
+      }
+    };
+    each(q => { if (q.every(isFinite)) for (let i = 0; i < 3; i++) { lo[i] = Math.min(lo[i], q[i]); hi[i] = Math.max(hi[i], q[i]); } });
+    const c = lo.map((x, i) => (x + hi[i]) / 2), E = Math.max(1e-6, ...hi.map((x, i) => x - lo[i])), k = 112 / E;
+    each(q => [100 + (q[0] - c[0]) * k, 80 + (q[1] - c[1]) * k, (q[2] - c[2]) * k]);
+    for (const p of prims) p.fig = 0;
+    const firstTime = resetCam || !this.FT;
+    this.FT = { c, k, o: meta.o!, s: meta.s!, R: meta.R!, Ri: inv3(meta.R!) };
+    this.T = { free: true, dim: 3, line: meta.line }; this.dim = 3; this.EF = null; this.R = meta.R!; this.ctx = ctx;
+    this.usesT = ctx.usesT; this.duration = ctx.duration ?? 6;
+    v.build({ ...ctx, prims, page: { w: 200, h: 160, style: 'paper' } } as any, []);
+    if (firstTime) { this.resetCamera(); this.showFrameUI(false); }
+    this.q('.xp-sub').textContent = `${this.host.title?.() ?? ''} · 3D drawing (line ${meta.line}) · coordinates are the drawing's own`;
+    this.el.querySelectorAll<HTMLElement>('.d3').forEach(e => (e.style.display = ''));
+    (this.q('.xp-tt') as HTMLElement).style.display = this.usesT ? 'flex' : 'none';
+    this.q<HTMLInputElement>('.xp-t').max = String(this.duration); this.updT();
+    this.gl.classList.remove('flat');
+    this.q('.xp-hint').innerHTML = 'drag to turn · right-drag to pan · scroll to zoom<br>hover (or tap) a point or line to read its coordinates · click to pin';
+    this.refreshPins();
+    if (this.lastMouse && !this.probeQueued) this.queueProbe(); else if (!this.lastProbe) this.read(this.idleText());
+  }
+  private probeFree(cx: number, cy: number) {
+    const v = this.viewer; if (!v || !this.FT) return;
+    this.ov.clear(); this.lastProbe = null;
+    const rec = v.pickAt(cx, cy); if (!rec) { this.read(this.idleText()); return; }
+    let w: number[] | null = null;
+    if (rec.kind === 'dot' && rec.c) w = rec.c;
+    else if (rec.kind === 'stroke' && rec.pts) {
+      const r = v.renderer.domElement.getBoundingClientRect(); const t = new THREE.Vector3(); let bd = Infinity;
+      for (let i = 0; i + 2 < rec.pts.length; i += 3) {
+        t.set(rec.pts[i], rec.pts[i + 1], rec.pts[i + 2]).project(v.camera);
+        const d = Math.hypot(r.left + (t.x + 1) / 2 * r.width - cx, r.top + (1 - t.y) / 2 * r.height - cy);
+        if (d < bd) { bd = d; w = [rec.pts[i], rec.pts[i + 1], rec.pts[i + 2]]; }
+      }
+    } else if (rec.kind === 'area') { const h = this.rayHit(rec.objs, cx, cy); if (h) w = h.point.toArray(); }
+    else if (rec.kind === 'text' && rec.group) w = new THREE.Vector3().setFromMatrixPosition(rec.group.matrixWorld).toArray();
+    if (!w) { this.read(this.idleText()); return; }
+    const q = this.worldToModel(w);
+    this.ov.sphere(w, 1.1, C.red); this.ov.label(w, F3(q));
+    this.lastProbe = { p: q, text: `point ${F3(q)} (line ${rec.line})` };
+    this.read(`point = ${F3(q)}\n|point| = ${fmtNum(Math.hypot(...q))}\n\nin the drawing's own coordinates\n(before onpage() turned it)\n\ndrawn by line ${rec.line} of the page`);
+  }
+
   // ---------------------------------------------------------------- pins
   private pin(cx: number, cy: number) {
+    if (this.fig !== null) { this.probeFree(cx, cy); if (this.lastProbe) { this.pinData.push({ kind: 'pt', p: this.lastProbe.p, text: this.lastProbe.text }); this.refreshPins(); } return; }
     if (!this.EF) return;
     if (this.dim === 2) {
       const sf = this.hooksOf('slopefield')[0];
@@ -595,10 +703,10 @@ export class Explorer {
     this.refreshPins();
   }
   private refreshPins() {
-    if (!this.pins || !this.EF) return;
+    if (!this.pins || (!this.EF && !this.FT)) return;
     this.pins.clear(); const EF = this.EF; const r = this.curRanges();
     this.pinData.forEach((pd, i) => {
-      if (pd.kind === 'pt') { const P = EF._raw(this.dim === 3 ? pd.p : [pd.p[0], pd.p[1]]); this.pins.sphere(P, 1.2, '#b0282c'); this.pins.label(P, `#${i + 1}`, 'pin'); }
+      if (pd.kind === 'pt') { const P = this.FT ? this.modelToWorld(pd.p) : EF._raw(this.dim === 3 ? pd.p : [pd.p[0], pd.p[1]]); this.pins.sphere(P, 1.2, '#b0282c'); this.pins.label(P, `#${i + 1}`, 'pin'); }
       else {
         const f = (x: number, y: number) => this.num(pd.f, [x, y]); const h = (r[1] - r[0]) / 500;
         const run = (dir: number) => { const out: (number[] | null)[] = []; let x = pd.x, y = pd.y; for (let k = 0; k < 2000; k++) { const k1 = f(x, y), k2 = f(x + dir * h / 2, y + dir * h * k1 / 2), k3 = f(x + dir * h / 2, y + dir * h * k2 / 2), k4 = f(x + dir * h, y + dir * h * k3); y += dir * h * (k1 + 2 * k2 + 2 * k3 + k4) / 6; x += dir * h; if (!isFinite(y) || x < r[0] || x > r[1]) break; out.push(y >= r[2] && y <= r[3] ? EF._raw([x, y]) : null); } return out; };

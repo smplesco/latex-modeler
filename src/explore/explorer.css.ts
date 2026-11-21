@@ -35,6 +35,8 @@ export const EXPLORER_CSS = `
 .xp-chip{position:absolute;z-index:6;transform:translate(-100%,0);background:rgba(17,24,32,.78);color:#e8f4ff;border:1px solid #36b4ff;border-radius:5px;padding:2px 8px;font:600 11px Inter,system-ui,sans-serif;cursor:pointer;opacity:.55;transition:opacity .15s;white-space:nowrap}
 .xp-chip:hover{opacity:1;background:#36b4ff;color:#04121c}
 @media (max-width:860px){.xp-side{width:220px}}
+
+@media (max-width: 760px){.xp.show{position:fixed;inset:0;z-index:45}.xp-main{flex-direction:column}.xp-side{width:auto!important;max-height:40%;border-left:none!important;border-top:1px solid #dfe3e8}.xp-bar{gap:4px}.xp-sub{display:none}.xp-hint{display:none}}
 `;
 export function injectExplorerCSS() {
   if (document.getElementById('xp-css')) return;

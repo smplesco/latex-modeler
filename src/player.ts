@@ -50,6 +50,7 @@ async function main() {
       <div id="bpErr"></div><div id="bpLoad">Loading…</div></div>
   </div>`;
   const $ = (id: string) => document.getElementById(id)!;
+  if (matchMedia('(pointer: coarse)').matches) $('bpHint').innerHTML = 'drag to orbit · pinch to zoom · two-finger drag to pan<br>tap a figure\'s ⤢ button to explore it in 3D';
   await texReady();
   const viewer = new Viewer($('bpGl'));
   let t = 0, duration = 6, usesT = false, playing = false, follow = true, ctx: RunCtx | null = null, first = true;
@@ -57,7 +58,7 @@ async function main() {
     source: () => doc.source, time: () => t, measure: measureTex, title: () => doc.name,
     snapshot: (url, name) => { const a = document.createElement('a'); a.href = url; a.download = name; a.click(); },
   });
-  const chips = new FigureChips($('bpGl'), viewer, i => explorer.open(i));
+  const chips = new FigureChips($('bpGl'), viewer, t => explorer.openTarget(t));
   const tour = () => ctx?.cam ?? (() => { const ph = duration > 0 ? t / duration : 0; return { yaw: 0.85 * Math.sin(2 * Math.PI * ph), pitch: 0.5 * Math.sin(Math.PI * ph), zoom: 1 + 0.3 * Math.sin(Math.PI * ph) }; })();
   const applyCam = () => { const c = tour(); viewer.place(c.yaw, c.pitch, c.zoom); };
   const compile = () => {
@@ -67,7 +68,7 @@ async function main() {
     usesT = ctx.usesT; duration = ctx.duration ?? 6;
     ($('bpSl') as HTMLInputElement).max = String(duration);
     $('bpT').style.display = usesT || ctx.cam ? 'flex' : 'none';
-    $('bpExp').style.display = ctx.frames.length ? '' : 'none';
+    $('bpExp').style.display = chips.count ? '' : 'none';
     if (first) { first = false; viewer.place(0, 0, 1); }
   };
   const setT = (v: number) => {
@@ -81,7 +82,7 @@ async function main() {
   $('bpCam').onclick = () => setFollow(!follow);
   $('bpOrtho').onclick = () => { viewer.setOrtho(!viewer.isOrtho); $('bpOrtho').classList.toggle('on', viewer.isOrtho); };
   $('bpReset').onclick = () => { setFollow(false); viewer.place(0, 0, 1); };
-  $('bpExp').onclick = () => { if (ctx?.frames.length) explorer.open(0); };
+  $('bpExp').onclick = () => { const f = chips.first(); if (f) explorer.openTarget(f); };
   viewer.renderer.domElement.addEventListener('pointerdown', () => { if (follow && !playing) setFollow(false); });
   window.addEventListener('keydown', e => {
     if (explorer.isOpen || (e.target as HTMLElement).tagName === 'INPUT') return;

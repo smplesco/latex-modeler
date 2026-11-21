@@ -130,7 +130,7 @@ button,select,input{font:inherit;color:inherit}
 #toast{z-index:70;position:fixed;left:50%;bottom:40px;transform:translateX(-50%) translateY(20px);background:#333;color:#fff;padding:8px 14px;border-radius:6px;font-size:12.5px;opacity:0;pointer-events:none;transition:all .25s;z-index:60;box-shadow:0 6px 18px rgba(0,0,0,.4);max-width:80vw}
 #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 @media (max-width:860px){
-  #main{grid-template-columns:1fr;grid-template-rows:58% 0 42%}
+  #main{grid-template-columns:1fr;grid-template-rows:minmax(0,58%) minmax(0,1fr)}
   #viewpane{order:-1}
   #split{display:none}
   #brand span{display:none}

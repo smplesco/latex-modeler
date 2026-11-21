@@ -168,6 +168,18 @@ export class Viewer {
     this.content.traverse(o => { if (o === this.content || dyn.has(o)) return; if (o.userData.line !== undefined) o.visible = !o.userData.hide; });
     this.lastDyn = ''; this.dirty = true;
   }
+  /** world-space bounds of every hand-drawn (onpage) 3D figure, keyed by figure id */
+  figBounds(figs: Set<number>): Map<number, THREE.Box3> {
+    const out = new Map<number, THREE.Box3>(); this.content.updateMatrixWorld(true);
+    for (const r of this.picks) {
+      const f = r.prim?.fig; if (!f || !figs.has(f) || r.kind === 'text') continue;
+      let b = out.get(f); if (!b) { b = new THREE.Box3(); out.set(f, b); }
+      for (const o of r.objs) { try { b.expandByObject(o); } catch { /* ignore */ } }
+    }
+    return out;
+  }
+  /** height of the paper surface (figures float above it) */
+  paperZ = 0;
   /** world-space bounds of every figure (frame) on the page, for the Explore buttons */
   frameBounds(): Map<number, THREE.Box3> {
     const out = new Map<number, THREE.Box3>(); this.content.updateMatrixWorld(true);
@@ -291,6 +303,60 @@ export class Viewer {
     this.lastDyn = ''; this.dirty = true; this.render();
     return url;
   }
+  /** blurred silhouette (top view) of a set of primitives, as a canvas plus its placement in page mm */
+  private figureShadow(prims: any[]): { canvas: HTMLCanvasElement; w: number; h: number; cx: number; cy: number; dx: number; dy: number } | null {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, zTop = 0;
+    const visit = (x: number, y: number, z: number) => { if (!isFinite(x) || !isFinite(y)) return; x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); if (isFinite(z)) zTop = Math.max(zTop, z); };
+    const shapes = prims.filter(p => p.kind !== 'tex' && !(p.opacity !== undefined && p.opacity < 0.05));
+    for (const p of shapes) {
+      if (p.pts) for (const q of p.pts) visit(q[0], q[1], q[2]);
+      if (p.kind === 'arrow') { visit(p.a[0], p.a[1], p.a[2]); visit(p.b[0], p.b[1], p.b[2]); }
+      if (p.kind === 'dot') visit(p.p[0], p.p[1], p.p[2]);
+      if (p.pos && (p.kind === 'trimesh' || p.kind === 'segs')) for (let i = 0; i < p.pos.length; i += 3) visit(p.pos[i], p.pos[i + 1], p.pos[i + 2]);
+    }
+    if (!(x1 > x0) || !(y1 > y0)) return null;
+    const blurMm = Math.max(2.5, Math.min(11, zTop * 0.11 + 2)), pad = blurMm * 2.2;
+    x0 -= pad; y0 -= pad; x1 += pad; y1 += pad;
+    const W = x1 - x0, H = y1 - y0, res = Math.min(4, 256 / Math.max(W, H)); // px per mm
+    const cw = Math.max(8, Math.round(W * res)), chh = Math.max(8, Math.round(H * res));
+    const c = document.createElement('canvas'); c.width = cw; c.height = chh; const g = c.getContext('2d')!;
+    const X = (x: number) => (x - x0) * res, Y = (y: number) => (y1 - y) * res;
+    g.fillStyle = g.strokeStyle = '#000'; g.lineCap = g.lineJoin = 'round';
+    for (const p of shapes) {
+      g.globalAlpha = Math.max(0.15, Math.min(1, (p.opacity ?? 1) * parseColor(p.color ?? '#000')[1]));
+      if (p.kind === 'trimesh') {
+        const P = p.pos, I = p.idx; const tri = (a: number, b: number, d: number) => { g.beginPath(); g.moveTo(X(P[3 * a]), Y(P[3 * a + 1])); g.lineTo(X(P[3 * b]), Y(P[3 * b + 1])); g.lineTo(X(P[3 * d]), Y(P[3 * d + 1])); g.closePath(); g.fill(); g.stroke(); };
+        g.lineWidth = 0.6;
+        if (I) for (let i = 0; i + 2 < I.length; i += 3) tri(I[i], I[i + 1], I[i + 2]); else for (let i = 0; i + 2 < P.length / 3; i += 3) tri(i, i + 1, i + 2);
+      } else if (p.kind === 'poly' && p.pts?.length > 2) {
+        g.beginPath(); p.pts.forEach((q: number[], i: number) => (i ? g.lineTo(X(q[0]), Y(q[1])) : g.moveTo(X(q[0]), Y(q[1])))); g.closePath(); g.fill();
+      } else if (p.kind === 'line' && p.pts?.length > 1) {
+        g.lineWidth = Math.max(1, (p.width ?? 0.3) * res * 2.5); g.beginPath();
+        let pen = false; for (const q of p.pts) { if (!isFinite(q[0]) || !isFinite(q[1])) { pen = false; continue; } if (pen) g.lineTo(X(q[0]), Y(q[1])); else { g.moveTo(X(q[0]), Y(q[1])); pen = true; } }
+        g.stroke();
+      } else if (p.kind === 'segs') {
+        g.lineWidth = Math.max(1, (p.width ?? 0.2) * res * 2); g.beginPath();
+        for (let i = 0; i + 5 < p.pos.length; i += 6) { g.moveTo(X(p.pos[i]), Y(p.pos[i + 1])); g.lineTo(X(p.pos[i + 3]), Y(p.pos[i + 4])); }
+        g.stroke();
+      } else if (p.kind === 'arrow') {
+        g.lineWidth = Math.max(1, (p.width ?? 0.35) * res * 2.5); g.beginPath(); g.moveTo(X(p.a[0]), Y(p.a[1])); g.lineTo(X(p.b[0]), Y(p.b[1])); g.stroke();
+      } else if (p.kind === 'dot') {
+        g.beginPath(); g.arc(X(p.p[0]), Y(p.p[1]), Math.max(1, p.r * res), 0, 2 * Math.PI); g.fill();
+      }
+    }
+    // blur the alpha channel (3 box passes ≈ gaussian); works in every browser, unlike ctx.filter
+    const img = g.getImageData(0, 0, cw, chh), A = new Float32Array(cw * chh);
+    for (let i = 0; i < A.length; i++) A[i] = img.data[4 * i + 3] / 255;
+    const r = Math.max(1, Math.round(blurMm * res / 1.7)), T = new Float32Array(A.length);
+    for (let pass = 0; pass < 3; pass++) {
+      for (let y = 0; y < chh; y++) { let acc = 0; const row = y * cw; for (let x = -r; x < cw + r; x++) { if (x + r < cw) acc += A[row + x + r] ?? 0; if (x >= 0 && x < cw) T[row + x] = acc / (2 * r + 1); if (x - r >= 0) acc -= A[row + x - r]; } }
+      for (let x = 0; x < cw; x++) { let acc = 0; for (let y = -r; y < chh + r; y++) { if (y + r < chh) acc += T[(y + r) * cw + x]; if (y >= 0 && y < chh) A[y * cw + x] = acc / (2 * r + 1); if (y - r >= 0) acc -= T[(y - r) * cw + x]; } }
+    }
+    for (let i = 0; i < A.length; i++) { img.data[4 * i] = 18; img.data[4 * i + 1] = 24; img.data[4 * i + 2] = 32; img.data[4 * i + 3] = Math.round(Math.min(1, A[i]) * 255); }
+    g.putImageData(img, 0, 0);
+    const off = Math.min(3.5, 0.9 + zTop * 0.04);
+    return { canvas: c, w: W, h: H, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, dx: off * 0.6, dy: -off };
+  }
   snapshotView(): string { this.render(); return this.renderer.domElement.toDataURL('image/png'); }
 
   // ---------------------------------------------------------------- scene building
@@ -316,6 +382,7 @@ export class Viewer {
       if (!flat) forEachZ(p, z => { minZ = Math.min(minZ, z); });
     }
     const pageZ = Math.min(-0.25, minZ - 1.2), flatZ = explore ? 0 : pageZ + 0.03;
+    this.paperZ = pageZ;
 
     // paper with a soft shadow
     const thick = 0.5;
@@ -343,6 +410,15 @@ export class Viewer {
         const pts = new THREE.Points(g, D(new THREE.PointsMaterial({ color: '#b9c4d0', size: 2, sizeAttenuation: false, depthWrite: false }))); pts.renderOrder = 1; this.content.add(pts);
       }
     }
+    }
+
+    // soft drop shadow under every floating figure: its real outline, blurred, offset away from the light
+    if (!explore) for (const f of figMin.keys()) {
+      const sh = this.figureShadow(ctx.prims.filter(p => p.fig === f));
+      if (!sh) continue;
+      const tex = D(new THREE.CanvasTexture(sh.canvas)); tex.colorSpace = THREE.SRGBColorSpace;
+      const m = new THREE.Mesh(D(new THREE.PlaneGeometry(sh.w, sh.h)), D(new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, opacity: 0.2 })));
+      m.position.set(sh.cx + sh.dx, sh.cy + sh.dy, pageZ + 0.012); m.renderOrder = 5; this.content.add(m);
     }
 
     const flatO = (o: THREE.Object3D, p: any) => { o.renderOrder = 10 + p.order; };

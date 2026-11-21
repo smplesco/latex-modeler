@@ -62,7 +62,7 @@ const explorer = new Explorer($('viewpane'), {
   },
   snapshot: (url, name) => exportImage(url, name),
 });
-const chips = new FigureChips($('gl'), viewer, (i) => explorer.open(i));
+const chips = new FigureChips($('gl'), viewer, (t) => explorer.openTarget(t));
 
 function updateTabs() {
   const tabs = $('tabs'); tabs.innerHTML = '';
@@ -198,6 +198,7 @@ $('bCam').onclick = () => setFollow(!followCam);
 $('bOrtho').onclick = () => { viewer.setOrtho(!viewer.isOrtho); $('bOrtho').classList.toggle('on', viewer.isOrtho); };
 $('bReset').onclick = () => { setFollow(false); viewer.place(0, 0, 1); };
 let hintHidden = false;
+if (matchMedia('(pointer: coarse)').matches) $('hint').innerHTML = 'drag to orbit · pinch to zoom · two-finger drag to pan<br>tap an element to jump to its code';
 viewer.onUserCamera = () => { if (followCam) setFollow(false); if (!hintHidden) { hintHidden = true; setTimeout(() => ($('hint').style.opacity = '0'), 1500); } };
 
 // click → jump to source; hover shows what a click would hit
@@ -392,7 +393,7 @@ window.addEventListener('keydown', e => {
   if (e.code === 'Space') { e.preventDefault(); setPlaying(!playing); }
   else if (e.key === 'f' || e.key === 'F') $('bReset').click();
   else if (e.key === 'o' || e.key === 'O') $('bOrtho').click();
-  else if ((e.key === 'e' || e.key === 'E') && !explorer.isOpen && lastCtx?.frames.length) explorer.open(0);
+  else if ((e.key === 'e' || e.key === 'E') && !explorer.isOpen && chips.first()) explorer.openTarget(chips.first()!);
 });
 
 // ------------------------------------------------------------------ splitter

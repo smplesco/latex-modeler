@@ -25,7 +25,7 @@ export interface RunCtx {
   // ---- figure bookkeeping (used by the Figure Explorer)
   frames: { id: number; dim: number; fig: number; args: any[]; line: number; F: any }[];
   hooks: { name: string; frame: number; args: any[]; line: number }[];
-  figMeta: Record<number, { dim: number }>;
+  figMeta: Record<number, { dim: number; free?: boolean; R?: number[][]; o?: number[]; s?: number; line?: number }>;
   frameSeq: number; role: any; curHook?: number; noHooks?: boolean; B?: Record<string, any>;
   overrides?: Record<string, number>; globalEnv?: Env;
   call: (f: any, args: any[]) => any; pageStyle: () => any; measure?: (src: string) => number | null;

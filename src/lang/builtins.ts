@@ -128,6 +128,8 @@ export function makeBuiltins(ctx: any): Record<string, any> {
       if (!(R instanceof Mat)) throw new Error('onpage: first argument must be a rotation, e.g. axo(rad(38), rad(22))');
       const [ox, oy, oz] = vec(origin, 'onpage origin').v3(); num(scale, 'onpage scale'); num(lift, 'onpage lift');
       const fig = ++ctx.figs;
+      // remembered so the Figure Explorer can open hand-drawn 3D figures and map points back to model space
+      ctx.figMeta[fig] = { dim: 3, free: true, R: R.m.map((r: number[]) => [...r]), o: [ox, oy, oz + lift], s: scale, line: ctx.sites && ctx.sites.length ? ctx.sites[0] : ctx.line };
       return (p: any) => { const q = R.mulV(new Vec(vec(p, 'projected point').v3())).c; return new Vec([ox + scale * q[0], oy + scale * q[1], oz + lift + scale * q[2]], fig); };
     },
     // ---- document
