@@ -122,7 +122,7 @@ Not supported yet: double integrals, partial-derivative notation as input, compl
 
 ### Figure Explorer: open any graph as a 3D model
 
-Every plot frame on the page gets a small **⤢ Explore** button in its corner. Click it (or double-click the figure, or press **E**) and the figure opens as its own full-size, re-computed graph on top of the page. The page and its code are untouched; **✕ Close** or **Esc** takes you back.
+Every plot frame on the page, and every hand-drawn 3D figure made with `onpage(...)`, gets a small **⤢ Explore** button on its corner of the paper. Click it (or double-click the figure, or press **E**) and the figure opens as its own full-size, re-computed graph on top of the page. Hand-drawn figures show the coordinates of any point or line in the drawing's own x, y, z. The page and its code are untouched; **✕ Close** or **Esc** takes you back.
 
 * **3D figures:** drag to turn, right-drag to pan, scroll to zoom. **Iso / Top / Front / Side** snap to standard views, **Persp** toggles perspective, **Spin** turns it on a turntable.
 * **Hover to probe.** The readout on the right shows exact values at the point under the mouse:
@@ -137,6 +137,8 @@ Every plot frame on the page gets a small **⤢ Explore** button in its corner. 
 * **Parameters:** every top-level number in the code (`a = 2`, `k = 0.5`…) gets a slider. Move it to see the figure change live; **write to code** puts the value into the page.
 * **Show:** turn cross-sections, wireframe, box and other helpers on or off.
 * **Snapshot** saves a PNG of the explorer view; **⤢** fills the window.
+* **Export → 3D model (GLB)** saves the figure with its colours, curves and labels for Blender, PowerPoint (Insert → 3D Model), Windows 3D Viewer or a web viewer. **STL for 3D printing** saves its surfaces as watertight 1.2 mm shells in millimetres, z up, ready for a slicer.
+* **Phones and tablets:** tap the figure to read values (then **📌 Pin this point**), drag to pan and pinch to zoom 2D graphs; the explorer fills the screen on small displays.
 
 
 ### Files and export
@@ -146,7 +148,13 @@ Every plot frame on the page gets a small **⤢ Explore** button in its corner. 
   * **Page as SVG:** vector output for print or Inkscape.
   * **Page as PNG:** 200 dpi.
   * **Current view as PNG:** what you see on screen.
-  * **Interactive HTML (3D):** one self-contained `.html` file (about 3 MB) with the page, the 3D viewer, the timeline and the Figure Explorer built in. Send it to anyone: it opens offline in Chrome, Edge, Firefox or Safari by double-clicking it, with nothing to install. It can also be uploaded to itch.io (as an HTML project), GitHub Pages, Google Sites (Embed → code) or a learning platform that accepts HTML files.
+  * **Share link:** the page's code compressed into a link (after the `#`, so nothing is uploaded anywhere). Whoever opens it gets a live copy of the page in the web app. Links made in the desktop app point to the GitHub Pages site.
+  * **Interactive HTML (3D):** one self-contained `.html` file with the page, the 3D viewer, the timeline and the Figure Explorer built in. Send it to anyone: it opens in Chrome, Edge, Firefox or Safari by double-clicking it, with nothing to install, and has an **Open in LaTeX Modeler** button for an editable copy. Two sizes:
+    * **Compact (≈ 0.7–1 MB):** every label on the page is pre-rendered inside the file. Works offline; only brand-new labels (e.g. tick numbers after zooming in the explorer, or text that changes continuously while playing) fetch the LaTeX engine from the internet.
+    * **Full (≈ 2.8 MB):** includes the whole LaTeX engine, so everything works offline, always.
+    It can also be uploaded to itch.io (as an HTML project), GitHub Pages, Google Sites (Embed → code) or a learning platform that accepts HTML files.
+  * **3D model (GLB):** the whole page as a 3D scene.
+  * **Video or GIF…:** records the view as MP4 (or WebM where MP4 isn't available) or an animated GIF: a swing or full turn around the page, or the page's own animation, at 640×360 up to 1920×1080. Frames are rendered one by one, so the video is smooth however heavy the page is.
   * **Copy page code**
 
 ### Shortcuts
