@@ -12,6 +12,7 @@ import { MODEL_EXAMPLES } from './model/examples';
 import type { ModelResult } from './model/generate';
 import { getPlatform, Platform } from './platform';
 import { REFERENCE } from './ui/reference';
+import { shareLink, readShare } from './share';
 import type { Explorer } from './explore/explorer';
 import { FigureChips, type ExploreTarget } from './explore/chips';
 
@@ -314,6 +315,7 @@ const baseName = () => doc().name.replace(/\.bd$/, '');
 async function doExport(kind: string) {
   if (!lastCtx) { toast('fix the errors first'); return; }
   if (kind === 'html') { await exportHTML(); return; }
+  if (kind === 'share') { await exportShare(); return; }
   if (kind === 'code') { try { await navigator.clipboard.writeText(editor.value); toast('page code copied'); } catch { toast('copy was blocked — select the code and press Ctrl+C'); } return; }
   let name: string, data: string | Uint8Array, mime: string, previewUrl: string;
   if (kind === 'svg') {
@@ -381,6 +383,33 @@ async function exportHTML() {
 }
 (window as any).__buildHTML = buildStandaloneHTML;
 
+// ---- share links: the page's code travels inside the link itself
+async function exportShare() {
+  let url: string;
+  try { url = await shareLink(doc().name, editor.value); } catch (e: any) { toast('could not make a link: ' + (e.message || e)); return; }
+  let copied = false; try { await navigator.clipboard.writeText(url); copied = true; } catch { /* blocked: the dialog lets them copy */ }
+  const long = url.length > 8000;
+  modal(`<h3>Share link</h3><p style="margin:4px 0 10px;line-height:1.5">${copied ? '<b>Copied.</b> ' : ''}Anyone who opens this link sees this page live in LaTeX Modeler and can orbit, explore and edit their own copy.
+    The code is inside the link itself (after the <code>#</code>), so nothing is uploaded anywhere.${long ? `<br><span style="color:#e0a24a">This page is large: the link is ${(url.length / 1000).toFixed(0)}k characters, which some chat apps cut short. Interactive HTML export is safer for big pages.</span>` : ''}</p>
+    <input id="xLink" readonly style="width:100%;box-sizing:border-box;font:12px var(--mono);padding:6px;background:#1b1b1b;color:#ddd;border:1px solid #444;border-radius:4px" value="${esc(url)}">
+    <div class="row" style="margin-top:10px"><span>${url.length.toLocaleString()} characters</span><button class="vbtn" id="xClose">Close</button><button class="vbtn" id="xOpen">Open in new tab</button><button class="vbtn primary" id="xCopy">Copy link</button></div>`);
+  const inp = $<HTMLInputElement>('xLink'); inp.onfocus = () => inp.select();
+  $('xClose').onclick = closeModal;
+  $('xOpen').onclick = () => window.open(url, '_blank');
+  $('xCopy').onclick = async () => { try { await navigator.clipboard.writeText(url); toast('link copied'); } catch { inp.focus(); inp.select(); toast('press Ctrl+C to copy'); } };
+}
+/** open a share link from the address bar (on start-up, or pasted into an open app) */
+async function openShared(hash: string): Promise<boolean> {
+  let sh: { name: string; source: string } | null = null;
+  try { sh = await readShare(hash); } catch (e: any) { toast('this share link is damaged: ' + (e.message || e)); return false; }
+  if (!sh) return false;
+  const same = docs.find(d => d.text === sh!.source);
+  if (same) openDoc(same.id); else addDoc(sh.name, sh.source, undefined, sh.source);
+  flashStatus('opened a shared page'); toast(`opened shared page “${doc().name}” — it's your own copy now`);
+  return true;
+}
+window.addEventListener('hashchange', () => { if (/^#s=/.test(location.hash)) openShared(location.hash); });
+
 async function exportImage(url: string, name: string) {
   const bin = atob(url.split(',')[1]); const u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
   if (platform.kind === 'desktop') { if (await platform.exportFile(name, u8, 'image/png')) toast('saved ' + name); return; }
@@ -432,6 +461,7 @@ async function boot() {
   const init = await platform.initialFile();
   if (init) { const ex = docs.find(d => d.path === init.path); if (ex) current = ex.id; else { docs.push({ id: 'f' + Date.now(), name: init.name, text: init.text, saved: init.text, path: init.path }); current = docs[docs.length - 1].id; } }
   editor.value = doc().text;
+  if (/^#s=/.test(location.hash)) await openShared(location.hash);
   updateTabs(); renderPanel();
   viewer.resize();
   compile(true);

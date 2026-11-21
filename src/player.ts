@@ -6,6 +6,7 @@ import { Viewer } from './render/viewer';
 import { texReady, measureTex } from './render/tex';
 import { Explorer } from './explore/explorer';
 import { FigureChips } from './explore/chips';
+import { APP_URL, shareFragment } from './share';
 
 declare global { interface Window { __LATEX_MODELER_DOC?: { name: string; source: string; exported?: string } } }
 
@@ -43,6 +44,7 @@ async function main() {
       <button class="bb on" id="bpOrtho" title="Orthographic / perspective (O)">Ortho</button>
       <button class="bb" id="bpReset" title="Back to the flat page view (F)">Reset</button>
       <button class="bb" id="bpExp" title="Open the first figure in the explorer (E)">Explore figures</button>
+      <a class="bb" id="bpOpen" target="_blank" rel="noopener" style="display:none;text-decoration:none" title="Open a copy of this page in the LaTeX Modeler editor">Open in LaTeX Modeler ↗</a>
       <span class="sp"></span><small>made with LaTeX Modeler${doc.exported ? ' · ' + doc.exported : ''}</small>
     </div>
     <div id="bpView"><div id="bpGl"></div>
@@ -92,6 +94,8 @@ async function main() {
     else if (e.key === 'e' || e.key === 'E') $('bpExp').click();
   });
   compile(); $('bpLoad').remove();
+  // link to an editable copy (the page code travels inside the link; skipped for very large pages)
+  shareFragment(doc.name, doc.source).then(f => { if (f.length < 30000) { const a = $('bpOpen') as HTMLAnchorElement; a.href = APP_URL + '#' + f; a.style.display = ''; } }).catch(() => {});
   let last = performance.now();
   const loop = (now: number) => {
     requestAnimationFrame(loop);
