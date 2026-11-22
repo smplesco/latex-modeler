@@ -1,0 +1,18 @@
+// Torus knot — a (3, 7) knot wound on a translucent torus, with a bead running along it.
+page("A5", "cream")
+duration(12)
+
+tex("\textbf{A (3, 7) torus knot}", (74, 196), {size: 17})
+tex("\mathbf{k}(s) = \big((R + r\cos 7s)\cos 3s,\; (R + r\cos 7s)\sin 3s,\; r\sin 7s\big)", (74, 186), {size: 9.5, color: "#5b5446"})
+
+R = 2
+r = 0.8
+B = frame3d((74, 102), 92, (-3, 3), (-3, 3), (-1.5, 1.5), {equal: true, labels: ["x", "y", "z"], ticks: 4})
+torus(u, v) = ((R + r * cos(v)) * cos(u), (R + r * cos(v)) * sin(u), r * sin(v))
+psurf(B, torus, (0, 2 * pi), (0, 2 * pi), {n: 72, nv: 30, opacity: 0.45, colormap: "cool", colorBy: "v", wire: 0})
+
+knot(s) = ((R + 1.04 * r * cos(7 * s)) * cos(3 * s), (R + 1.04 * r * cos(7 * s)) * sin(3 * s), 1.04 * r * sin(7 * s))
+pplot(B, knot, (0, 2 * pi), {color: "#b4472d", width: 0.75, n: 1400})
+dot(B.map(knot(2 * pi * t / 12)), {r: 1.5, color: "#2a2620"})
+
+tex("\text{the knot winds 3 times around the axis and 7 times through the hole}", (74, 26), {size: 8.5, color: "#7a6f5c"})

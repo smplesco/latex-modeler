@@ -1,0 +1,20 @@
+// Implicit surfaces — a gyroid and two merging blobs, found by marching cubes with isoplot().
+page("A4 landscape", "paper")
+duration(6)
+
+tex("\textbf{Implicit surfaces } F(x, y, z) = c", (148.5, 196), {size: 18})
+line((20, 188), (277, 188), {width: 0.3})
+
+// left: the gyroid, a triply periodic minimal surface
+G = frame3d((78, 106), 92, (-pi, pi), (-pi, pi), (-pi, pi), {equal: true, labels: ["x", "y", "z"], piX: true, piY: true, piZ: true})
+isoplot(G, (x, y, z) => sin(x) * cos(y) + sin(y) * cos(z) + sin(z) * cos(x), {n: 44, colormap: "cool"})
+tex("\sin x\cos y + \sin y\cos z + \sin z\cos x = 0", (78, 30), {size: 11})
+text("gyroid", (78, 20), {size: 9, color: "#777"})
+
+// right: two "metaballs" whose fields add up; as they approach they fuse
+d = 0.55 + 0.45 * cos(2 * pi * t / 6)
+M = frame3d((219, 106), 96, (-2.2, 2.2), (-1.4, 1.4), (-1.4, 1.4), {equal: true, labels: ["x", "y", "z"], ticks: 3})
+blob(x, y, z) = 1 / ((x - d)^2 + y^2 + z^2 + 0.05) + 1 / ((x + d)^2 + y^2 + z^2 + 0.05)
+isoplot(M, blob, {level: 2.4, n: 46, colormap: "warm"})
+tex("\frac{1}{|\mathbf{x} - \mathbf{a}|^2} + \frac{1}{|\mathbf{x} + \mathbf{a}|^2} = 2.4, \quad |\mathbf{a}| = " + fmt(d, 2), (219, 30), {size: 11})
+text("metaballs (press play)", (219, 20), {size: 9, color: "#777"})

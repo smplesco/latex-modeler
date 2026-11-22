@@ -6,6 +6,27 @@ You write pages in a small scripting language (`.bd`). Text and math are typeset
 
 Runs in the browser, or as a Windows / macOS / Linux desktop app (Tauri).
 
+**Start screen.** The app opens on a start screen instead of a page. From there you can:
+- pick a **template**: blank page, lecture notes (ruled paper on a desk), chalkboard (framed on a classroom wall), 16:9 slides, blueprint, poster, graph-paper worksheet, or a floating figure. Or build a blank page in any size, paper and stage.
+- open an **example** from the library, sorted into folders: getting started, surfaces, curves and fields, physics, calculus, linear algebra.
+- type an equation to auto-model it.
+- go back to the pages you already have open.
+
+**Formats.** A page has a size, a paper and a *stage*, the room it sits in:
+```
+page("A4", "lined", {stage: "desk"})
+```
+- **Papers:** plain, grid, dots, lined, graph, cream, dark, blueprint, chalk.
+- **Stages:**
+  - studio: the classic dark room
+  - desk: a wooden desk
+  - gallery: a bright room
+  - board: a framed chalkboard
+  - present: fills the screen on black
+  - float: no sheet, figures float on the page colour
+
+To change the format of any page, use **Page ▾** in the viewer. It rewrites the `page(…)` line, so Ctrl+Z undoes it.
+
 ---
 
 ## 1. Use it right away (no install)
@@ -203,7 +224,10 @@ src/
               (built to public/player/player.js by `npm run build:player`; dev and build run it for you)
   editor/     code editor
   platform/   web.ts and tauri.ts: the only code that differs between browser and desktop
-  examples/   example pages
+  examples/   example pages, one folder per topic (shown on the start screen)
+  templates/  starter pages for the New page templates
+  library.ts  reads templates/examples (title from the first comment line)
+  ui/         start screen (home.ts), card pictures (thumbs.ts), reference panel
 src-tauri/    desktop wrapper (Rust): dialogs, file access, .bd file association
 tests/run.ts  auto-model corpus test
 .github/workflows/  CI, desktop release builds, GitHub Pages

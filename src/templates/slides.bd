@@ -1,0 +1,17 @@
+// Slides — a 16:9 title slide that fills the screen on black. Press F to fit, orbit to show the 3D.
+page("slide", "dark", {stage: "present"})
+duration(10)
+
+tex("\textbf{Waves on a membrane}", (16, 108), {size: 26, anchor: "w"})
+tex("\text{separation of variables in polar coordinates}", (16, 95), {size: 12, anchor: "w", color: "#9fb3d1"})
+line((16, 88), (110, 88), {color: "#36b4ff", width: 0.5})
+tex("u(r, \theta, t) = J_1(k r)\,\cos\theta\,\cos\omega t", (16, 72), {size: 13, anchor: "w"})
+text("Your name · Course · Date", (16, 20), {size: 10, anchor: "w", color: "#8792a6"})
+
+// the (1,1) drum mode, vibrating
+B = frame3d((186, 66), 112, (-1, 1), (-1, 1), (-1, 1), {style: "axes", labels: ["", "", ""], ticks: 0})
+J1(x) = x / 2 - x^3 / 16 + x^5 / 384 - x^7 / 18432 + x^9 / 1474560
+k = 3.8317
+amp = 0.75 * cos(2 * pi * t / 2.5)
+drum(u, v) = (u * cos(v), u * sin(v), amp * J1(k * u) / 0.5819 * cos(v))
+psurf(B, drum, (0, 1), (0, 2 * pi), {n: 26, nv: 64, colormap: "cool", wire: 10, wireColor: "rgba(255,255,255,0.25)"})

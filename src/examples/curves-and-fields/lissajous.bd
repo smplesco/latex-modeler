@@ -1,0 +1,17 @@
+// Lissajous figures — x = sin(a s + δ), y = sin(b s) for a, b = 1 … 4, with the phase δ sweeping.
+page("A4", "paper")
+duration(8)
+del = 2 * pi * t / 8
+
+tex("\textbf{Lissajous figures}", (105, 280), {size: 19})
+tex("x = \sin(a s + \delta), \quad y = \sin(b s), \qquad \delta = " + fmt(del, 2), (105, 270), {size: 11, color: "#555"})
+
+for a in 1..5 {
+  for b in 1..5 {
+    c = (40 + (a - 1) * 45, 233 - (b - 1) * 50)      // centre of this cell
+    rect(c - (19, 19), (38, 38), {color: "#ddd", width: 0.2})
+    curve(s => c + 17 * (sin(a * s + del), sin(b * s)), 0, 2 * pi, {color: hsl(200 + 40 * (a + b), 65, 42), width: 0.45, n: 400})
+    dot(c + 17 * (sin(a * 2 * del + del), sin(b * 2 * del)), {r: 0.9, color: "#333"})
+    tex(str(a) + ":" + str(b), c - (0, 23.5), {size: 8.5, color: "#888"})
+  }
+}

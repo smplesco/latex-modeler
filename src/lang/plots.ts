@@ -8,6 +8,8 @@ import { contourLines, isoSurface } from '../geom/marching';
 import { cmap, cmapHex } from '../geom/colormap';
 
 export function plotBuiltins(ctx: any, add: (p: any, fig?: number) => any, ink: (o: any) => string, _W: any, B: any): Record<string, any> {
+  /** the language's false is 0: options like {axes: false} arrive as 0 */
+  const no = (v: any) => v === false || v === 0;
   const m = Math;
   const callNum = (f: any, args: any[]) => { const r = ctx.call(f, args); return typeof r === 'number' ? r : NaN; };
   const callVec = (f: any, args: any[]): number[] | null => { const r = ctx.call(f, args); return r instanceof Vec ? r.v3() : null; };
@@ -68,7 +70,7 @@ export function plotBuiltins(ctx: any, add: (p: any, fig?: number) => any, ink: 
         map: (p: any) => V(raw(vec(p, 'map').v3()), fig), _raw: raw, _sx: sx, _sy: sy,
         _inv: (q: number[]) => [x0 + (q[0] - ox) / sx, y0 + (q[1] - oy) / sy, 0] };
       const inside = (x: number, y: number) => x >= x0 - 1e-12 && x <= x1 + 1e-12 && y >= y0 - 1e-12 && y <= y1 + 1e-12;
-      if (o.grid !== false) {
+      if (!no(o.grid)) {
         const g: number[] = [];
         if (o.polar) {
           const rmax = m.max(...[[x0, y0], [x1, y0], [x0, y1], [x1, y1]].map(([a, b]) => m.hypot(a, b)));
@@ -83,7 +85,7 @@ export function plotBuiltins(ctx: any, add: (p: any, fig?: number) => any, ink: 
         segs(g, o.gridColor ?? c.grid, o.gridWidth ?? 0.15, 0);
       }
       if (o.box) add({ kind: 'line', pts: [raw([x0, y0]), raw([x1, y0]), raw([x1, y1]), raw([x0, y1])], closed: true, color: c.edge, width: 0.2, opacity: 1 }, 0);
-      if (o.axes !== false) {
+      if (!no(o.axes)) {
         const ay = (y0 <= 0 && 0 <= y1) ? 0 : y0, ax = (x0 <= 0 && 0 <= x1) ? 0 : x0, ext = 3.5;
         const a1 = raw([x0, ay]), a2 = raw([x1, ay]), b1 = raw([ax, y0]), b2 = raw([ax, y1]);
         B.arrow(V(a1), V([a2[0] + ext, a2[1]]), { color: axC, width: 0.25, head: 1.9 });
@@ -91,16 +93,16 @@ export function plotBuiltins(ctx: any, add: (p: any, fig?: number) => any, ink: 
         const cross = ax === 0 && ay === 0; const tk: number[] = [];
         xt.vals.forEach((v, i) => {
           const p = raw([v, ay]); tk.push(p[0], p[1] - 0.9, 0, p[0], p[1] + 0.9, 0);
-          if (o.ticks === false || (cross && m.abs(v) < 1e-12)) return;
+          if (no(o.ticks) || (cross && m.abs(v) < 1e-12)) return;
           T(xt.labels[i], V([p[0], p[1] - 1.8]), { size: ls, color: lblC, anchor: 'n' });
         });
         yt.vals.forEach((v, i) => {
           const p = raw([ax, v]); tk.push(p[0] - 0.9, p[1], 0, p[0] + 0.9, p[1], 0);
-          if (o.ticks === false || (cross && m.abs(v) < 1e-12)) return;
+          if (no(o.ticks) || (cross && m.abs(v) < 1e-12)) return;
           T(yt.labels[i], V([p[0] - 1.8, p[1]]), { size: ls, color: lblC, anchor: 'e' });
         });
         segs(tk, axC, 0.2, 0);
-        if (cross && o.ticks !== false) { const q = raw([0, 0]); T('0', V([q[0] - 1.2, q[1] - 1.5]), { size: ls, color: lblC, anchor: 'ne' }); }
+        if (cross && !no(o.ticks)) { const q = raw([0, 0]); T('0', V([q[0] - 1.2, q[1] - 1.5]), { size: ls, color: lblC, anchor: 'ne' }); }
         T(o.xlabel ?? 'x', V([a2[0] + ext + 1.3, a2[1]]), { size: o.titleSize ?? 10, anchor: 'w', color: axC });
         T(o.ylabel ?? 'y', V([b2[0], b2[1] + ext + 1.3]), { size: o.titleSize ?? 10, anchor: 's', color: axC });
       }
@@ -236,7 +238,7 @@ export function plotBuiltins(ctx: any, add: (p: any, fig?: number) => any, ink: 
         const dl = m.hypot(it.d[0], it.d[1], it.d[2]); if (!(dl > 0)) continue;
         const len = L * (0.25 + 0.75 * it.mag / mx), u = it.d.map(x => x / dl);
         const a = it.p.map((x, i) => x - u[i] * len / 2), b = it.p.map((x, i) => x + u[i] * len / 2);
-        const color = o.color ?? (o.colormap === false ? ink({}) : cmapHex(it.mag / mx, o.colormap ?? 'viridis'));
+        const color = o.color ?? (no(o.colormap) ? ink({}) : cmapHex(it.mag / mx, o.colormap ?? 'viridis'));
         add({ kind: 'arrow', a, b, color, width: o.width ?? (d3 ? 0.3 : 0.25), head: o.head ?? m.min(len * 0.45, d3 ? 1.9 : 1.5), both: false }, F.fig);
       }
       return null;
@@ -278,7 +280,7 @@ export function plotBuiltins(ctx: any, add: (p: any, fig?: number) => any, ink: 
       };
       const all = run(-1).reverse().concat(run(1).slice(1));
       for (const poly of clipY(all, F.y0, F.y1)) polyline(poly.map(q => F._raw(q)), o, 0, { color: '#d64545', width: 0.4 });
-      if (o.dot !== false && ys >= F.y0 && ys <= F.y1) B.dot(V(F._raw([xs, ys])), { r: 0.65, color: o.color ?? '#d64545' });
+      if (!no(o.dot) && ys >= F.y0 && ys <= F.y1) B.dot(V(F._raw([xs, ys])), { r: 0.65, color: o.color ?? '#d64545' });
       return null;
     },
 
@@ -355,7 +357,7 @@ export function plotBuiltins(ctx: any, add: (p: any, fig?: number) => any, ink: 
           const P = (pu: number, pw: number) => { const q = [0, 0, 0]; q[a] = val; q[u] = pu; q[w] = pw; return q; };
           withDyn({ kind: 'face', n: nrm(a, side) }, () => {
             const quad = [P(lo[u], lo[w]), P(hi[u], lo[w]), P(hi[u], hi[w]), P(lo[u], hi[w])];
-            if (o.panes !== false) B.poly(quad.map(q => Pt(q[0], q[1], q[2])), { fill: o.pane ?? pc.pane });
+            if (!no(o.panes)) B.poly(quad.map(q => Pt(q[0], q[1], q[2])), { fill: o.pane ?? pc.pane });
             const g: number[] = [];
             for (const v of T3[u].vals) g.push(...raw(P(v, lo[w])), ...raw(P(v, hi[w])));
             for (const v of T3[w].vals) g.push(...raw(P(lo[u], v)), ...raw(P(hi[u], v)));
@@ -409,7 +411,7 @@ export function plotBuiltins(ctx: any, add: (p: any, fig?: number) => any, ink: 
       const Z = new Float64Array(Wd * Wd);
       for (let j = 0; j <= n; j++) for (let i = 0; i <= n; i++) {
         let z = callNum(f, [gx(i), gy(j)]);
-        if (o.clip !== false && (z < z0 - tol || z > z1 + tol)) z = NaN;
+        if (!no(o.clip) && (z < z0 - tol || z > z1 + tol)) z = NaN;
         Z[j * Wd + i] = z;
       }
       const cm = o.colormap ?? 'viridis';
@@ -423,7 +425,7 @@ export function plotBuiltins(ctx: any, add: (p: any, fig?: number) => any, ink: 
       add({ kind: 'trimesh', pos, idx, colors: o.fill ? undefined : cols, color: o.fill ?? '#7fb3e6', opacity: o.opacity ?? 1, lit: true }, F.fig);
       const wire = o.wire ?? 12;
       if (wire > 0) segs(gridWire(pos, Z, n, n, wire), o.wireColor ?? 'rgba(20,28,45,0.38)', o.wireWidth ?? 0.12, F.fig);
-      if (o.floor !== false) {
+      if (!no(o.floor)) {
         for (const lev of niceTicks(z0, z1, o.levels ?? 9).vals) {
           if (lev <= z0 + tol || lev >= z1 - tol) continue;
           const vals = Z.map(z => z - lev);

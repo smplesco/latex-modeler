@@ -1,4 +1,4 @@
-// saddle.bd — a shaded surface in a textbook 3D frame, on graph paper.
+// Saddle surface — a shaded surface in a textbook 3D frame, on graph paper.
 // frame3d draws the panes, grid, ticks and labels; splot samples, shades and
 // adds floor contours. The amplitude breathes with t: press play.
 page("A5", "grid")

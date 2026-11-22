@@ -1,0 +1,30 @@
+// Linear maps — the grid morphs under a 2×2 matrix; its eigenvectors only stretch, they never turn.
+page("A5", "paper")
+duration(6)
+s = smoothstep(0.5, 4, t)
+I = mat((1, 0), (0, 1))
+M = mat((2, 1), (1, 2))
+A = lerp(I, M, s)                     // halfway between the identity and M
+
+tex("\textbf{A linear map}", (74, 196), {size: 16})
+tex("M = \begin{pmatrix} 2 & 1 \\ 1 & 2 \end{pmatrix}, \qquad \lambda_1 = 3, \;\; \lambda_2 = 1", (74, 184), {size: 11})
+
+F = frame2d((14, 50), (120, 120), (-4, 4), (-4, 4), {equal: true, grid: false})
+// the image of every grid line (pplot clips them to the frame)
+for i in -12..13 {
+  pplot(F, u => A * (i, u), (-14, 14), {color: "#9cc3e6", width: 0.2, n: 80})
+  pplot(F, u => A * (u, i), (-14, 14), {color: "#9cc3e6", width: 0.2, n: 80})
+}
+// the unit square and its image: area = det
+sq = [A * (0, 0), A * (1, 0), A * (1, 1), A * (0, 1)]
+poly(map(sq, p => F.map(p)), {fill: "#f2a93b", opacity: 0.45, stroke: "#b8761a", width: 0.3})
+arrow(F.map((0, 0)), F.map(A * (1, 0)), {color: "#d64545", width: 0.5})
+arrow(F.map((0, 0)), F.map(A * (0, 1)), {color: "#2e9e6a", width: 0.5})
+// eigenvectors
+arrow(F.map((0, 0)), F.map(A * (1, 1)), {color: "#7b3fb0", width: 0.6})
+arrow(F.map((0, 0)), F.map(A * (1, -1)), {color: "#7b3fb0", width: 0.6})
+tex("\mathbf{v}_1", F.map(A * (1, 1) + (0.35, 0.1)), {size: 10, color: "#7b3fb0"})
+tex("\mathbf{v}_2", F.map(A * (1, -1) + (0.3, -0.3)), {size: 10, color: "#7b3fb0"})
+
+tex("\det = " + fmt(det(A), 2), (74, 38), {size: 11, color: "#b8761a"})
+tex("\text{the orange square's area is the determinant: it grows from 1 to 3}", (74, 28), {size: 8.5, color: "#777"})

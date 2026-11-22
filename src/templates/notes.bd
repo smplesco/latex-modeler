@@ -1,0 +1,36 @@
+// Lecture notes — ruled paper on a wooden desk, with room for figures in the margin.
+// Ruled lines sit 8 mm apart from y = 263 down: write on y = 263 - 8k with anchor "sw".
+page("A4", "lined", {stage: "desk"})
+ink = "#1f3a68"
+set({color: ink})
+row(k) = 263 - 8 * k + 1.2          // baseline of ruled line k
+note(s, k) = tex(s, (30, row(k)), {size: 11, anchor: "sw"})
+
+// ---- header (above the first ruled line)
+tex("\textbf{Lecture 3}\;\cdot\;\textbf{The dot product}", (30, 272), {size: 17, anchor: "w"})
+text("Linear algebra", (192, 272), {size: 9.5, anchor: "e", color: "#7a8699"})
+
+// ---- notes
+note("\textbf{Definition.}\; \mathbf{a}\cdot\mathbf{b} = a_1 b_1 + a_2 b_2 + a_3 b_3", 1)
+note("\text{Geometrically: } \mathbf{a}\cdot\mathbf{b} = \lVert\mathbf{a}\rVert\,\lVert\mathbf{b}\rVert\cos\theta", 2)
+note("\text{so } \mathbf{a}\perp\mathbf{b} \iff \mathbf{a}\cdot\mathbf{b} = 0.", 3)
+note("\textbf{Projection} \text{ of } \mathbf{b} \text{ onto } \mathbf{a}:", 5)
+note("\operatorname{proj}_{\mathbf{a}}\mathbf{b} = \dfrac{\mathbf{a}\cdot\mathbf{b}}{\mathbf{a}\cdot\mathbf{a}}\,\mathbf{a}", 7)
+note("\textbf{Example.}\; (1, 2, 2)\cdot(2, 0, 1) = 2 + 0 + 2 = 4", 9)
+note("\cos\theta = \dfrac{4}{3\cdot\sqrt5} \approx 0.596, \quad \theta \approx 53.4^\circ", 11)
+
+// ---- margin figure: b projected onto a (the angle animates)
+duration(8)
+F = frame2d((122, 132), (66, 62), (-0.3, 3.3), (-0.3, 2.6), {equal: true, axes: false, grid: false})
+th = 0.35 + 0.75 * (0.5 + 0.5 * sin(2 * pi * t / 8))
+A = (3, 0.9)
+B = 2.2 * (cos(th + 0.29), sin(th + 0.29))
+s = dot(A, B) / dot(A, A)
+P = s * A
+line(F.map(B), F.map(P), {dash: 0.8, width: 0.25, color: "#888"})
+arrow(F.map((0, 0)), F.map(A), {width: 0.45, color: "#c0392b"})
+arrow(F.map((0, 0)), F.map(B), {width: 0.45, color: ink})
+line(F.map((0, 0)), F.map(P), {width: 1.1, color: "#2e9e6a", opacity: 0.7})
+tex("\mathbf{a}", F.map(A + (0.18, -0.12)), {size: 11, color: "#c0392b"})
+tex("\mathbf{b}", F.map(B + (-0.05, 0.2)), {size: 11})
+tex("\operatorname{proj}_{\mathbf{a}}\mathbf{b}", F.map(P + (0.1, -0.35)), {size: 9, color: "#2e9e6a"})

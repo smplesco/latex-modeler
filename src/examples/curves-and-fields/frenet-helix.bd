@@ -1,4 +1,4 @@
-// frenet-helix.bd — a space curve with its moving frame.
+// Frenet–Serret frame — a space curve with its moving tangent, normal and binormal.
 // The point runs along the helix as t advances. Press play.
 page("A5", "paper")
 duration(8)

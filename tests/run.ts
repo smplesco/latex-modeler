@@ -87,10 +87,16 @@ for (const src of ANTI) {
   if (bad) { fail++; console.log(`✗ integral  ${src}: derivative does not match`); } else console.log(`✓ integral  ${src}`);
 }
 for (const src of ['e^{-x^2}', '\\frac{\\sin x}{x}', '\\cos(x^2)']) { n++; if (antiderivative(parseLatex(src)[0], 'x')) { fail++; console.log(`✗ integral  ${src}: claimed an elementary antiderivative`); } else console.log(`✓ no elementary antiderivative: ${src}`); }
-// the hand-written examples must run too
-for (const f of readdirSync('src/examples').filter(f => f.endsWith('.bd'))) {
+// the hand-written examples and templates must run too, at several times
+const walk = (d: string): string[] => readdirSync(d, { withFileTypes: true }).flatMap(e => e.isDirectory() ? walk(d + '/' + e.name) : e.name.endsWith('.bd') ? [d + '/' + e.name] : []);
+for (const f of [...walk('src/examples'), ...walk('src/templates')]) {
   n++;
-  try { const ctx = runProgram(readFileSync('src/examples/' + f, 'utf8'), 1, { measure: () => 10 }); console.log(`✓ example   ${String(ctx.prims.length).padStart(5)} marks  ${f}`); }
+  try {
+    const src = readFileSync(f, 'utf8'); let marks = 0;
+    for (const t of [0, 1, 3.7]) marks = runProgram(src, t, { measure: () => 10 }).prims.length;
+    if (!/^\/\/ .+ — .+/.test(src.split('\n')[0])) throw Object.assign(new Error('first line must be "// Title — description"'), { line: 1 });
+    console.log(`✓ example   ${String(marks).padStart(5)} marks  ${f.replace('src/', '')}`);
+  }
   catch (e: any) { fail++; console.log(`✗ example ${f}: line ${e.line}: ${e.message}`); }
 }
 console.log('\nkinds:', kinds);

@@ -1,4 +1,4 @@
-// stress-tensor.bd — a textbook page whose figure is real 3D.
+// Cauchy stress tensor — a textbook page whose figure is real 3D.
 // Orbit the view: the cube rises off the paper. Press play.
 page("A4", "paper")
 duration(6)

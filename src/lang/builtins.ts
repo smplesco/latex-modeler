@@ -2,11 +2,8 @@
 import { Vec, Mat, binop, isObj, typeName, show } from './values';
 import { plotBuiltins } from './plots';
 
-export const PAGES: Record<string, [number, number]> = { A3: [297, 420], A4: [210, 297], A5: [148, 210], A6: [105, 148], letter: [215.9, 279.4], legal: [215.9, 355.6], square: [200, 200], slide: [254, 142.9] };
-export const PAGE_STYLES: Record<string, any> = {
-  paper: { bg: '#ffffff', ink: '#111111' }, grid: { bg: '#ffffff', ink: '#111111', grid: 5 }, dots: { bg: '#ffffff', ink: '#111111', dots: 5 },
-  cream: { bg: '#fbf7ec', ink: '#2a2620' }, dark: { bg: '#1d2230', ink: '#e9edf5', dark: true }, blueprint: { bg: '#13407a', ink: '#e8f1ff', grid: 5, dark: true },
-};
+import { PAGES, PAGE_STYLES, STAGES } from './pages';
+export { PAGES, PAGE_STYLES, STAGES };
 
 export function num(v: any, what: string): number { if (typeof v !== 'number' || Number.isNaN(v)) throw new Error(`${what} must be a number, got ${typeName(v)}`); return v; }
 export function vec(v: any, what: string): Vec { if (!(v instanceof Vec)) throw new Error(`${what} must be a point like (x, y) or (x, y, z), got ${typeName(v)}`); return v; }
@@ -133,7 +130,8 @@ export function makeBuiltins(ctx: any): Record<string, any> {
       return (p: any) => { const q = R.mulV(new Vec(vec(p, 'projected point').v3())).c; return new Vec([ox + scale * q[0], oy + scale * q[1], oz + lift + scale * q[2]], fig); };
     },
     // ---- document
-    page: (size: any = 'A4', style: any = 'paper') => {
+    page: (size: any = 'A4', style: any = 'paper', opts: any = {}) => {
+      if (isObj(style)) { opts = style; style = 'paper'; }
       let wh: number[];
       if (size instanceof Vec) wh = [size.x, size.y];
       else {
@@ -143,8 +141,12 @@ export function makeBuiltins(ctx: any): Record<string, any> {
         if (!base) throw new Error(`unknown page size "${s}" (try A3, A4, A5, A6, letter, legal, square, slide or (w, h))`);
         wh = land ? [base[1], base[0]] : base;
       }
-      if (!PAGE_STYLES[style]) throw new Error(`unknown page style "${style}" (paper, grid, dots, cream, dark, blueprint)`);
-      ctx.page = { w: wh[0], h: wh[1], style }; return null;
+      if (!PAGE_STYLES[style]) throw new Error(`unknown page style "${style}" (${Object.keys(PAGE_STYLES).join(', ')})`);
+      if (!isObj(opts)) throw new Error('page: the third argument holds options, e.g. {stage: "desk"}');
+      const stage = opts.stage ?? 'studio';
+      if (!STAGES[stage]) throw new Error(`unknown stage "${stage}" (${Object.keys(STAGES).join(', ')})`);
+      if (!(wh[0] > 0 && wh[1] > 0 && wh[0] <= 5000 && wh[1] <= 5000)) throw new Error('page size must be between 0 and 5000 mm');
+      ctx.page = { w: wh[0], h: wh[1], style, stage }; return null;
     },
     set: (o: any) => { if (!isObj(o)) throw new Error('set needs options like {color: "#333", width: 0.3, size: 11}'); Object.assign(ctx.defaults, o); return null; },
     duration: (s: any) => { ctx.duration = m.max(0.1, num(s, 'duration')); return null; },

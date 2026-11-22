@@ -1,0 +1,46 @@
+// Poster — an A3 research poster on cream paper, hung in a bright gallery.
+page("A3", "cream", {stage: "gallery"})
+duration(8)
+accent = "#b4472d"
+set({color: "#2a2620"})
+
+// ---- header band
+rect((0, 360), (297, 60), {fill: "#2a2620"})
+tex("\textbf{How do soap films choose their shape?}", (148.5, 397), {size: 28, color: "#fbf7ec"})
+tex("\text{Minimal surfaces and the mean-curvature equation}", (148.5, 380), {size: 14, color: "#e6d8bd"})
+text("A. Student  ·  Department of Mathematics", (148.5, 368), {size: 10, color: "#c9b99b"})
+
+// ---- column helpers
+head(s, x, y) = {
+  tex("\textbf{" + s + "}", (x, y), {size: 15, anchor: "w", color: accent})
+  line((x, y - 5), (x + 125, y - 5), {color: accent, width: 0.4})
+}
+para(s, x, y) = tex("\text{" + s + "}", (x, y), {size: 10.5, anchor: "w", maxw: 125})
+
+head("1  Question", 16, 345)
+para("A wire loop dipped in soap makes the film of least area.", 16, 333)
+para("Which surfaces have zero mean curvature everywhere?", 16, 326)
+tex("H = \tfrac12(\kappa_1 + \kappa_2) = 0", (78, 310), {size: 14})
+
+head("2  Method", 16, 290)
+para("Write the film as a graph z = f(x, y); the area integral", 16, 278)
+tex("A[f] = \iint \sqrt{1 + f_x^2 + f_y^2}\;dx\,dy", (78, 262), {size: 13})
+para("is stationary exactly when f solves", 16, 247)
+tex("(1 + f_y^2) f_{xx} - 2 f_x f_y f_{xy} + (1 + f_x^2) f_{yy} = 0", (78, 234), {size: 11})
+
+head("3  Results", 156, 345)
+para("Scherk's surface  z = log(cos y / cos x)  is minimal:", 156, 333)
+S = frame3d((222, 268), 88, (-1.45, 1.45), (-1.45, 1.45), (-3, 3), {labels: ["x", "y", "z"], ticks: 3})
+splot(S, (x, y) => log(cos(y) / cos(x)), {n: 70, colormap: "warm", wire: 14})
+
+head("4  The catenoid", 16, 205)
+para("Rotating a catenary gives the only minimal surface of revolution.", 16, 193)
+C = frame3d((80, 125), 105, (-2.2, 2.2), (-2.2, 2.2), (-1.4, 1.4), {style: "axes", labels: ["", "", ""], ticks: 0})
+neck = 0.85 + 0.1 * sin(2 * pi * t / 8)
+psurf(C, (u, v) => (neck * cosh(v / neck) * cos(u), neck * cosh(v / neck) * sin(u), v), (0, 2 * pi), (-1.2, 1.2), {colormap: "warm", colorBy: "v", n: 60, nv: 24})
+
+head("5  Takeaway", 156, 205)
+para("Soap films are nature's solvers of a nonlinear PDE:", 156, 193)
+para("surface tension pulls the film until H = 0 everywhere.", 156, 186)
+tex("\boxed{\;H = 0\;}", (218, 160), {size: 22, color: accent})
+text("Orbit the poster: both surfaces are real 3D.", (218, 130), {size: 9.5, color: "#7a6f5c"})

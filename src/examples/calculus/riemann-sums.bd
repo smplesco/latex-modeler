@@ -1,0 +1,29 @@
+// Riemann sums — midpoint rectangles under a curve; as n doubles their total area approaches the integral.
+page("A5 landscape", "paper")
+duration(6)
+n = 2^(floor(t) + 1)                 // 2, 4, 8 … 64 rectangles
+f(x) = 2 + 0.8 * sin(2 * x) + x^2 / 8
+a = 0
+b = 4
+dx = (b - a) / n
+
+tex("\textbf{Riemann sums}", (16, 138), {size: 15, anchor: "w"})
+tex("\int_0^4 \Big(2 + 0.8\sin 2x + \frac{x^2}{8}\Big)\,dx", (194, 136), {size: 10.5, anchor: "e"})
+
+F = frame2d((16, 24), (124, 98), (-0.2, 4.4), (0, 5))
+S = 0
+for i in 0..n {
+  x = a + i * dx
+  h = f(x + dx / 2)
+  S = S + h * dx
+  poly([F.map((x, 0)), F.map((x + dx, 0)), F.map((x + dx, h)), F.map((x, h))], {fill: "#5b9bd5", opacity: 0.35, stroke: "#2b6cb0", width: 0.2})
+}
+fplot(F, f, {width: 0.55, color: "#d64545"})
+
+exact = 8 + 0.4 * (1 - cos(8)) + 64 / 24
+tex("n = " + str(n), (170, 104), {size: 13})
+tex("M_n = \sum_{i=1}^{n} f(m_i)\,\Delta x", (170, 88), {size: 10})
+tex("M_n = " + fmt(S, 5), (170, 72), {size: 11, color: "#2b6cb0"})
+tex("\int = " + fmt(exact, 5), (170, 60), {size: 11, color: "#d64545"})
+tex("\text{error} = " + fmt(abs(S - exact), 5), (170, 46), {size: 10, color: "#555"})
+tex("\text{halving } \Delta x \text{ quarters the error}", (170, 34), {size: 8.5, color: "#777"})

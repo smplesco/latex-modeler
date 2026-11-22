@@ -8,7 +8,7 @@ import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
 import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import { getTex, anchorOffset } from './tex';
-import { PAGE_STYLES } from '../lang/builtins';
+import { PAGE_STYLES, stageOf, pageRules, type Stage } from '../lang/pages';
 import type { RunCtx } from '../lang/interp';
 import { dynVisible } from './dyn';
 
@@ -44,7 +44,9 @@ export class Viewer {
   ortho = new THREE.OrthographicCamera(-1, 1, 1, -1, -50000, 50000);
   camera: THREE.Camera; controls: OrbitControls;
   orthoH = 320; page = { w: 210, h: 297 }; billboards: THREE.Object3D[] = []; lineMats: LineMaterial[] = [];
-  disposables: { dispose(): void }[] = []; dirty = true; shadowTex: THREE.Texture | null = null;
+  disposables: { dispose(): void }[] = []; dirty = true; shadowTex: THREE.Texture | null = null; woodTex: THREE.Texture | null = null;
+  /** the stage the current page is shown on (room colour, sheet, frame) */
+  stage: Stage = stageOf('studio'); pageBg = '#ffffff';
   onUserCamera: () => void = () => {};
   picks: PickRec[] = []; private cur: PickRec | null = null; private lit = new Map<any, THREE.Color>();
   dynObjs: { o: THREE.Object3D; dyn: any }[] = []; private lastDyn = '';
@@ -100,7 +102,10 @@ export class Viewer {
   size(): [number, number] { if (this.captureSize) return this.captureSize; const r = this.el.getBoundingClientRect(); return [Math.max(1, r.width), Math.max(1, r.height)]; }
   beginCapture(w: number, h: number) { this.savedPR = this.renderer.getPixelRatio(); this.captureSize = [w, h]; this.renderer.setPixelRatio(1); this.resize(); }
   endCapture() { this.captureSize = null; this.renderer.setPixelRatio(this.savedPR); this.resize(); this.lastDyn = ''; this.dirty = true; }
-  fitHeight() { const [w, h] = this.size(); return Math.max(this.page.h, this.page.w / (w / h)) * 1.08; }
+  fitHeight() {
+    const [w, h] = this.size(); const pad = this.mode === 'page' ? this.stage.pad : 0, fit = this.mode === 'page' ? this.stage.fit : 1.08;
+    return Math.max(this.page.h + 2 * pad, (this.page.w + 2 * pad) / (w / h)) * fit;
+  }
   updateOrtho() { const [w, h] = this.size(); const a = w / h; Object.assign(this.ortho, { left: -this.orthoH * a / 2, right: this.orthoH * a / 2, top: this.orthoH / 2, bottom: -this.orthoH / 2 }); this.ortho.updateProjectionMatrix(); }
   resize() {
     const [w, h] = this.size();
@@ -295,7 +300,7 @@ export class Viewer {
     cam.left = 0; cam.right = this.page.w; cam.top = this.page.h; cam.bottom = 0;
     cam.position.set(0, 0, 3000); cam.updateProjectionMatrix();
     const [vw, vh] = this.size(); const pr = this.renderer.getPixelRatio();
-    const bg = this.scene.background; this.scene.background = null;
+    const bg = this.scene.background; this.scene.background = this.stage.sheet === 'none' ? new THREE.Color(this.pageBg) : null;
     this.renderer.setPixelRatio(1); this.renderer.setSize(W, H, false);
     for (const m of this.lineMats) m.resolution.set(W, H);
     for (const b of this.billboards) b.quaternion.copy(cam.quaternion);
@@ -363,6 +368,95 @@ export class Viewer {
   }
   snapshotView(): string { this.render(); return this.renderer.domElement.toDataURL('image/png'); }
 
+  /** paper sheet, its shadow, printed rules, and the stage's props (desk surface, board frame) */
+  private buildStage(stage: Stage, style: any, w: number, h: number, pageZ: number, flatZ: number, D: <T extends { dispose(): void }>(x: T) => T) {
+    const thick = 0.5, bg = new THREE.Color(style.bg);
+    const basic = (c: THREE.ColorRepresentation, map?: THREE.Texture) => D(new THREE.MeshBasicMaterial({ color: c, map: map ?? null }));
+    if (stage.sheet === 'slab') {
+      const top = basic(bg), side = basic(bg.clone().multiplyScalar(0.78));
+      const paper = new THREE.Mesh(D(new THREE.BoxGeometry(w, h, thick)), [side, side, side, side, top, side]);
+      paper.position.set(w / 2, h / 2, pageZ - thick / 2); this.content.add(paper);
+      if (!this.shadowTex) {
+        const c = document.createElement('canvas'); c.width = c.height = 128; const g = c.getContext('2d')!;
+        const gr = g.createRadialGradient(64, 64, 10, 64, 64, 64); gr.addColorStop(0, 'rgba(0,0,0,.55)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+        g.fillStyle = gr; g.fillRect(0, 0, 128, 128); this.shadowTex = new THREE.CanvasTexture(c); this.shadowTex.colorSpace = THREE.SRGBColorSpace;
+      }
+      const pad = stage.frame ? 2 * stage.pad : 0;
+      const shadow = new THREE.Mesh(D(new THREE.PlaneGeometry((w + pad) * 1.22, (h + pad) * 1.16)), D(new THREE.MeshBasicMaterial({ map: this.shadowTex, transparent: true, depthWrite: false, opacity: stage.surface ? 0.85 : 1 })));
+      shadow.position.set(w / 2 + 2, h / 2 - 3, pageZ - thick - 3); this.content.add(shadow);
+    } else if (stage.sheet === 'flat') {
+      const p = new THREE.Mesh(D(new THREE.PlaneGeometry(w, h)), basic(bg)); p.position.set(w / 2, h / 2, pageZ); this.content.add(p);
+    }
+    // printed rules: grid, ruled lines, dots
+    if (stage.sheet !== 'none') {
+      const r = pageRules(style, w, h), z = flatZ - 0.01;
+      for (const grp of r.lines) {
+        const v: number[] = []; for (let i = 0; i < grp.seg.length; i += 4) v.push(grp.seg[i], grp.seg[i + 1], z, grp.seg[i + 2], grp.seg[i + 3], z);
+        const g = D(new THREE.BufferGeometry()); g.setAttribute('position', new THREE.Float32BufferAttribute(v, 3));
+        const ls = new THREE.LineSegments(g, D(new THREE.LineBasicMaterial({ color: grp.color, depthWrite: false }))); ls.renderOrder = 1; this.content.add(ls);
+      }
+      if (r.dots.length) {
+        const v: number[] = []; for (let i = 0; i < r.dots.length; i += 2) v.push(r.dots[i], r.dots[i + 1], z);
+        const g = D(new THREE.BufferGeometry()); g.setAttribute('position', new THREE.Float32BufferAttribute(v, 3));
+        const pts = new THREE.Points(g, D(new THREE.PointsMaterial({ color: r.dotColor, size: 2, sizeAttenuation: false, depthWrite: false }))); pts.renderOrder = 1; this.content.add(pts);
+      }
+    }
+    // a wooden desk under the page
+    if (stage.surface === 'wood') {
+      const S = Math.max(w, h) * 12, tex = this.wood();
+      const t = D(tex.clone()); t.needsUpdate = true; t.repeat.set(S / 520, S / 520);
+      const desk = new THREE.Mesh(D(new THREE.PlaneGeometry(S, S)), basic('#ffffff', t));
+      desk.position.set(w / 2, h / 2, pageZ - thick - 3.4); this.content.add(desk);
+    }
+    // a framed chalkboard: wooden frame, a ledge with chalk and an eraser
+    if (stage.frame) {
+      const fw = 9, z0 = pageZ - thick - 2, z1 = pageZ + 2.2, wood = this.wood();
+      const shade = (k: number) => basic(new THREE.Color('#b98a5e').multiplyScalar(k), wood);
+      const woodMats = [shade(0.72), shade(0.72), shade(0.9), shade(0.55), shade(1), shade(0.5)];   // +x −x +y −y +z −z
+      const box = (cx: number, cy: number, cz: number, sx: number, sy: number, sz: number, mats: THREE.Material | THREE.Material[]) => {
+        const b = new THREE.Mesh(D(new THREE.BoxGeometry(sx, sy, sz)), mats); b.position.set(cx, cy, cz); this.content.add(b); return b;
+      };
+      const zc = (z0 + z1) / 2, zs = z1 - z0;
+      box(w / 2, h + fw / 2, zc, w + 2 * fw, fw, zs, woodMats);
+      box(w / 2, -fw / 2, zc, w + 2 * fw, fw, zs, woodMats);
+      box(-fw / 2, h / 2, zc, fw, h, zs, woodMats);
+      box(w + fw / 2, h / 2, zc, fw, h, zs, woodMats);
+      // ledge
+      const ly = -fw - 2.2, lz0 = z0, lz1 = pageZ + 15;
+      box(w / 2, ly, (lz0 + lz1) / 2, w + 2 * fw + 6, 4.4, lz1 - lz0, woodMats);
+      const chalkMat = (c: string) => [basic(new THREE.Color(c).multiplyScalar(0.8)), basic(c), basic(new THREE.Color(c).multiplyScalar(0.92))];
+      const chalk = (x: number, len: number, c: string, rot: number) => {
+        const m = new THREE.Mesh(D(new THREE.CylinderGeometry(1.5, 1.5, len, 14)), chalkMat(c));
+        m.rotation.z = Math.PI / 2 + rot; m.position.set(x, ly + 2.2 + 1.5, pageZ + 8); this.content.add(m);
+      };
+      chalk(w * 0.18, 16, '#f4f2ea', 0.08); chalk(w * 0.18 + 22, 11, '#f2d27a', -0.12); chalk(w * 0.18 + 36, 9, '#9fd0f0', 0.2);
+      const ex = w * 0.78;
+      box(ex, ly + 2.2 + 2.2, pageZ + 7, 34, 4.4, 11, [basic('#4a4f57'), basic('#4a4f57'), basic('#5b616b'), basic('#3a3e45'), basic('#565c66'), basic('#3a3e45')]);
+      box(ex, ly + 2.2 + 4.4 + 2.4, pageZ + 7, 34, 4.8, 11, woodMats);
+    }
+  }
+  /** procedural wood grain (seeded, so every render looks the same) */
+  private wood(): THREE.Texture {
+    if (this.woodTex) return this.woodTex;
+    const N = 512, c = document.createElement('canvas'); c.width = c.height = N; const g = c.getContext('2d')!;
+    let seed = 7; const rnd = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
+    const planks = 4, ph = N / planks;
+    for (let k = 0; k < planks; k++) {
+      const base = [[150, 102, 64], [139, 92, 57], [158, 110, 70], [144, 97, 60]][k];
+      g.fillStyle = `rgb(${base})`; g.fillRect(0, k * ph, N, ph);
+      for (let i = 0; i < 46; i++) {
+        const y = k * ph + rnd() * ph, a = 0.05 + rnd() * 0.14, dark = rnd() < 0.7, ph1 = rnd() * 6, amp = 1 + rnd() * 3.5;
+        g.strokeStyle = dark ? `rgba(70,40,20,${a})` : `rgba(255,225,180,${a * 0.6})`; g.lineWidth = 0.6 + rnd() * 1.8;
+        g.beginPath();
+        for (let x = 0; x <= N; x += 8) { const yy = y + amp * Math.sin((x / N) * 2 * Math.PI * 2 + ph1) + 0.8 * Math.sin(x / 13 + ph1 * 3); x ? g.lineTo(x, yy) : g.moveTo(x, yy); }
+        g.stroke();
+      }
+      g.fillStyle = 'rgba(40,22,10,.45)'; g.fillRect(0, k * ph, N, 1.5);
+    }
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 4;
+    return (this.woodTex = t);
+  }
+
   // ---------------------------------------------------------------- scene building
   build(ctx: RunCtx, warnings: { line: number; msg: string }[]) {
     for (const d of this.disposables) d.dispose();
@@ -388,33 +482,9 @@ export class Viewer {
     const pageZ = Math.min(-0.25, minZ - 1.2), flatZ = explore ? 0 : pageZ + 0.03;
     this.paperZ = pageZ;
 
-    // paper with a soft shadow
-    const thick = 0.5;
-    if (!explore) {
-    const top = D(new THREE.MeshBasicMaterial({ color: style.bg })), side = D(new THREE.MeshBasicMaterial({ color: new THREE.Color(style.bg).multiplyScalar(0.78) }));
-    const paper = new THREE.Mesh(D(new THREE.BoxGeometry(pg.w, pg.h, thick)), [side, side, side, side, top, side]);
-    paper.position.set(pg.w / 2, pg.h / 2, pageZ - thick / 2); this.content.add(paper);
-    if (!this.shadowTex) {
-      const c = document.createElement('canvas'); c.width = c.height = 128; const g = c.getContext('2d')!;
-      const gr = g.createRadialGradient(64, 64, 10, 64, 64, 64); gr.addColorStop(0, 'rgba(0,0,0,.55)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
-      g.fillStyle = gr; g.fillRect(0, 0, 128, 128); this.shadowTex = new THREE.CanvasTexture(c); this.shadowTex.colorSpace = THREE.SRGBColorSpace;
-    }
-    const shadow = new THREE.Mesh(D(new THREE.PlaneGeometry(pg.w * 1.22, pg.h * 1.16)), D(new THREE.MeshBasicMaterial({ map: this.shadowTex, transparent: true, depthWrite: false })));
-    shadow.position.set(pg.w / 2 + 2, pg.h / 2 - 3, pageZ - thick - 3); this.content.add(shadow);
-    if (style.grid || style.dots) {
-      const s = style.grid || style.dots; const v: number[] = [];
-      if (style.grid) {
-        for (let x = s; x < pg.w - 1e-6; x += s) v.push(x, 0, flatZ - 0.01, x, pg.h, flatZ - 0.01);
-        for (let y = s; y < pg.h - 1e-6; y += s) v.push(0, y, flatZ - 0.01, pg.w, y, flatZ - 0.01);
-        const g = D(new THREE.BufferGeometry()); g.setAttribute('position', new THREE.Float32BufferAttribute(v, 3));
-        const ls = new THREE.LineSegments(g, D(new THREE.LineBasicMaterial({ color: style.dark ? '#3c6eaa' : '#cfe0f2', depthWrite: false }))); ls.renderOrder = 1; this.content.add(ls);
-      } else {
-        for (let x = s; x < pg.w; x += s) for (let y = s; y < pg.h; y += s) v.push(x, y, flatZ - 0.01);
-        const g = D(new THREE.BufferGeometry()); g.setAttribute('position', new THREE.Float32BufferAttribute(v, 3));
-        const pts = new THREE.Points(g, D(new THREE.PointsMaterial({ color: '#b9c4d0', size: 2, sizeAttenuation: false, depthWrite: false }))); pts.renderOrder = 1; this.content.add(pts);
-      }
-    }
-    }
+    // the stage: the room colour, the paper sheet, and any desk or frame around it
+    const stage = this.stage = stageOf(pg.stage); this.pageBg = style.bg;
+    if (!explore) { this.scene.background = new THREE.Color(stage.bg ?? style.bg); this.buildStage(stage, style, pg.w, pg.h, pageZ, flatZ, D); }
 
     // soft drop shadow under every floating figure: its real outline, blurred, offset away from the light
     if (!explore) for (const f of figMin.keys()) {

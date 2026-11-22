@@ -1,0 +1,34 @@
+// Unit circle animation — a point going round the circle draws the sine wave. Shows t, duration() and view().
+// t runs from 0 to the duration while playing; every line that uses t is recomputed each frame.
+page("A5 landscape", "paper")
+duration(6)
+th = 2 * pi * t / 6
+
+tex("\textbf{The unit circle draws } \sin\theta", (105, 136), {size: 15})
+
+C = frame2d((12, 40), (60, 60), (-1.25, 1.25), (-1.25, 1.25), {equal: true, grid: false})
+S = frame2d((84, 40), (114, 60), (0, 2 * pi), (-1.25, 1.25), {piTicks: true})
+red = "#d64545"
+blue = "#2b6cb0"
+
+// the circle, the radius and the angle
+curve(s => C.map((cos(s), sin(s))), 0, 2 * pi, {width: 0.4})
+P = (cos(th), sin(th))
+line(C.map((0, 0)), C.map(P), {width: 0.35})
+curve(s => C.map(0.25 * (cos(s), sin(s))), 0, th, {width: 0.3, color: "#888"})
+line(C.map((P.x, 0)), C.map(P), {color: red, width: 0.7})
+line(C.map((0, 0)), C.map((P.x, 0)), {color: blue, width: 0.7})
+dot(C.map(P), {r: 1.3, color: red})
+tex("\theta", C.map(0.38 * (cos(th / 2), sin(th / 2))), {size: 9})
+
+// the wave traced so far, and the link between the two pictures
+fplot(S, x => sin(x), {color: "#ddd", width: 0.3})
+curve(s => S.map((s, sin(s))), 0, max(th, 0.001), {color: red, width: 0.6, n: 200})
+line(C.map(P), S.map((th, sin(th))), {dash: 0.8, width: 0.2, color: "#999"})
+dot(S.map((th, sin(th))), {r: 1.3, color: red})
+
+tex("\theta = " + fmt(th, 2), (42, 30), {size: 10})
+tex("\color{#d64545}{\sin\theta = " + fmt(sin(th), 2) + "}\quad \color{#2b6cb0}{\cos\theta = " + fmt(cos(th), 2) + "}", (141, 30), {size: 10})
+
+// a scripted camera: used while the Camera button is on (it switches off when you orbit)
+view(0.18 * sin(th), 0.08, 1)

@@ -1,0 +1,41 @@
+// Chalkboard — a framed board on a classroom wall. Chalk colours: white, yellow, blue and pink.
+page("A4 landscape", "chalk", {stage: "board"})
+white = "#f0efe4"
+yellow = "#f2d27a"
+blue = "#9fd0f0"
+pink = "#f2a7b8"
+set({color: white, width: 0.45})
+
+tex("\textbf{Pythagoras' theorem}", (30, 186), {size: 22, anchor: "w"})
+tex("a^2 + b^2 = c^2", (30, 165), {size: 20, anchor: "w", color: yellow})
+tex("\text{the squares on the legs add up to the square on the hypotenuse}", (30, 152), {size: 11, anchor: "w", color: "#c9c8bd"})
+
+// a right triangle with the three squares on its sides
+O = (190, 52)
+a = 30
+b = 40
+P = O + (b, 0)
+Q = O + (0, a)
+sq(p, q, c) = {
+  d = q - p
+  n = (-d.y, d.x)
+  poly([p, q, q + n, p + n], {fill: c, opacity: 0.22, stroke: c, width: 0.45})
+}
+sq(O, Q, blue)          // a² on the vertical leg
+sq(P, O, pink)          // b² on the horizontal leg
+sq(Q, P, yellow)        // c² on the hypotenuse
+poly([O, P, Q], {fill: "#f0efe4", opacity: 0.12, stroke: white, width: 0.6})
+rect(O, (4, 4), {width: 0.35})
+tex("a", O + (4, a / 2), {size: 14, color: blue})
+tex("b", O + (b / 2, 4.5), {size: 14, color: pink})
+tex("c", O + (b / 2 - 1, a / 2 - 1.5), {size: 14, color: yellow})
+tex("a^2", O + (-a / 2, a / 2), {size: 16, color: blue})
+tex("b^2", O + (b / 2, -b / 2), {size: 16, color: pink})
+tex("c^2", O + (b / 2 + 21, a / 2 + 28), {size: 16, color: yellow})
+
+// a quick proof sketch
+tex("\text{Proof (rearrangement).}", (30, 128), {size: 12, anchor: "w", color: blue})
+tex("(a + b)^2 = c^2 + 4\cdot\tfrac12 ab", (34, 113), {size: 14, anchor: "w"})
+tex("a^2 + 2ab + b^2 = c^2 + 2ab", (34, 99), {size: 14, anchor: "w"})
+tex("\Rightarrow\; a^2 + b^2 = c^2 \quad \blacksquare", (34, 85), {size: 14, anchor: "w", color: yellow})
+tex("\text{e.g. } 3^2 + 4^2 = 5^2", (34, 62), {size: 12, anchor: "w", color: pink})

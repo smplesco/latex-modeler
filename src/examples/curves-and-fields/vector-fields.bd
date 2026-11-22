@@ -1,0 +1,30 @@
+// Vector fields — the field lines of an electric dipole, and a 3D swirl drawn with quiver().
+page("A4", "paper")
+duration(8)
+
+tex("\textbf{Vector fields}", (105, 280), {size: 19})
+line((20, 272), (190, 272), {width: 0.3})
+
+// ---- a dipole: +1 at (−1, 0), −1 at (1, 0)
+tex("\mathbf{E}(\mathbf{x}) = \frac{\mathbf{x} - \mathbf{a}}{|\mathbf{x} - \mathbf{a}|^3} - \frac{\mathbf{x} + \mathbf{a}}{|\mathbf{x} + \mathbf{a}|^3}", (105, 260), {size: 11})
+F = frame2d((25, 160), (160, 88), (-3, 3), (-1.65, 1.65), {equal: true})
+E(x, y) = {
+  p = ((x + 1)^2 + y^2)^1.5 + 0.001
+  q = ((x - 1)^2 + y^2)^1.5 + 0.001
+  ((x + 1) / p - (x - 1) / q, y / p - y / q)
+}
+streamlines(F, E, {n: 9, color: "#2b6cb0"})
+quiver(F, (x, y) => 0.18 * normalize(E(x, y)), {n: 21, color: "#9aa7b8"})
+dot(F.map((-1, 0)), {r: 2.2, color: "#d64545"})
+dot(F.map((1, 0)), {r: 2.2, color: "#2b6cb0"})
+tex("+", F.map((-1, 0)), {size: 10, color: "#fff"})
+tex("-", F.map((1, 0)), {size: 10, color: "#fff"})
+
+// ---- a 3D swirl: rotation about z plus an upward drift
+tex("\mathbf{v}(x, y, z) = (-y,\; x,\; 0.4)", (105, 140), {size: 11})
+B = frame3d((105, 74), 100, (-1.5, 1.5), (-1.5, 1.5), (-1.5, 1.5), {equal: true, labels: ["x", "y", "z"], ticks: 3})
+quiver(B, (x, y, z) => 0.3 * (-y, x, 0.4), {n: 5, colormap: "ocean"})
+helix(s) = (cos(s), sin(s), -1.4 + 0.4 * s / 1.8)
+pplot(B, helix, (0, 12.5), {color: "#d64545", width: 0.6})
+dot(B.map(helix(12.5 * t / 8)), {r: 1.4, color: "#d64545"})
+tex("\text{a particle carried by the flow follows a helix}", (105, 16), {size: 9, color: "#777"})

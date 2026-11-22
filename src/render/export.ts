@@ -1,6 +1,6 @@
 // Vector export of the straight-on page view as SVG (painter's algorithm for 3D figures).
 import { getTex, anchorOffset } from './tex';
-import { PAGE_STYLES } from '../lang/builtins';
+import { PAGE_STYLES, pageRules } from '../lang/pages';
 import type { RunCtx } from '../lang/interp';
 import { dynVisible } from './dyn';
 
@@ -94,9 +94,10 @@ export function exportSVG(ctx: RunCtx): string {
   flat.sort((a, b) => a.o - b.o);
   solid.sort((a, b) => a.z - b.z || a.o - b.o);
   top.sort((a, b) => a.o - b.o);
-  let grid = '';
-  if (ps.grid) { let d = ''; for (let x = ps.grid; x < w; x += ps.grid) d += `M${f(x)} 0V${f(h)}`; for (let y = ps.grid; y < h; y += ps.grid) d += `M0 ${f(Y(y))}H${f(w)}`; grid = `<path d="${d}" fill="none" stroke="${ps.dark ? '#3c6eaa' : '#cfe0f2'}" stroke-width="0.12"/>`; }
-  if (ps.dots) { for (let x = ps.dots; x < w; x += ps.dots) for (let y = ps.dots; y < h; y += ps.dots) grid += `<circle cx="${f(x)}" cy="${f(y)}" r="0.18" fill="#b9c4d0"/>`; }
+  // the paper's printed rules (grid, ruled lines, dots)
+  const rules = pageRules(ps, w, h);
+  let grid = rules.lines.map(g => { let d = ''; for (let i = 0; i < g.seg.length; i += 4) d += `M${f(g.seg[i])} ${f(Y(g.seg[i + 1]))}L${f(g.seg[i + 2])} ${f(Y(g.seg[i + 3]))}`; return `<path d="${d}" fill="none" stroke="${g.color}" stroke-width="${g.width}"/>`; }).join('');
+  for (let i = 0; i < rules.dots.length; i += 2) grid += `<circle cx="${f(rules.dots[i])}" cy="${f(Y(rules.dots[i + 1]))}" r="0.18" fill="${rules.dotColor}"/>`;
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${f(w)}mm" height="${f(h)}mm" viewBox="0 0 ${f(w)} ${f(h)}">
 <rect width="${f(w)}" height="${f(h)}" fill="${ps.bg}"/>

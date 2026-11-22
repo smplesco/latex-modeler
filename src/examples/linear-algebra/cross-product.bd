@@ -1,0 +1,26 @@
+// Cross product — a × b is perpendicular to both, and its length is the area of their parallelogram.
+page("A5", "paper")
+duration(8)
+th = 2 * pi * t / 8
+
+tex("\textbf{The cross product}", (74, 196), {size: 16})
+tex("|\mathbf{a}\times\mathbf{b}| = |\mathbf{a}|\,|\mathbf{b}|\sin\theta", (74, 186), {size: 11})
+
+pr = onpage(axo(rad(35), rad(20)), (70, 100), 34)
+a = (1.6, 0, 0)
+b = (0.6 * cos(th) + 0.3, 1.3 * sin(th) + 0.2, 0.25)
+c = cross(a, b)
+
+// the parallelogram spanned by a and b
+poly([pr((0, 0, 0)), pr(a), pr(a + b), pr(b)], {fill: "#f2a93b", opacity: 0.35, stroke: "#b8761a", width: 0.25})
+// faint axes
+for e in [(1, 0, 0), (0, 1, 0), (0, 0, 1)] { line(pr(-1.2 * e), pr(1.9 * e), {color: "#ccc", width: 0.2}) }
+arrow(pr((0, 0, 0)), pr(a), {color: "#d64545", width: 0.55})
+arrow(pr((0, 0, 0)), pr(b), {color: "#2e9e6a", width: 0.55})
+arrow(pr((0, 0, 0)), pr(c), {color: "#2b6cb0", width: 0.6})
+tex("\mathbf{a}", pr(a * 1.12), {size: 11, color: "#d64545", face: "viewer"})
+tex("\mathbf{b}", pr(b * 1.18), {size: 11, color: "#2e9e6a", face: "viewer"})
+tex("\mathbf{a}\times\mathbf{b}", pr(c * 1.08 + (0, 0, 0.18)), {size: 11, color: "#2b6cb0", face: "viewer"})
+
+tex("|\mathbf{a}\times\mathbf{b}| = " + fmt(norm(c), 2) + " = \text{area}", (74, 38), {size: 11})
+tex("\text{orbit the view: the blue arrow is always perpendicular to the orange face}", (74, 26), {size: 8.5, color: "#777"})

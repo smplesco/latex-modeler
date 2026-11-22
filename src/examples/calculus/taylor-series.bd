@@ -1,0 +1,18 @@
+// Taylor polynomials — sin x and its Taylor polynomials of growing degree, hugging the curve further out.
+page("A5 landscape", "paper")
+duration(8)
+K = floor(t) + 1                      // number of terms: degree 2K − 1
+
+tex("\textbf{Taylor polynomials of } \sin x", (16, 138), {size: 15, anchor: "w"})
+tex("T_{2K-1}(x) = \sum_{k=0}^{K-1} \frac{(-1)^k\,x^{2k+1}}{(2k+1)!}", (194, 135), {size: 10.5, anchor: "e"})
+
+T(x, m) = {
+  s = 0
+  for k in 0..m { s = s + (-1)^k * x^(2 * k + 1) / fact(2 * k + 1) }
+  s
+}
+F = frame2d((16, 22), (178, 98), (-3 * pi, 3 * pi), (-2, 2), {piTicks: true})
+for j in 1..K { fplot(F, x => T(x, j), {color: hsl(210, 30, 82), width: 0.3}) }
+fplot(F, x => sin(x), {width: 0.6})
+fplot(F, x => T(x, K), {color: "#d64545", width: 0.6})
+tex("\text{degree } " + str(2 * K - 1), (178, 112), {size: 11, color: "#d64545", anchor: "e"})

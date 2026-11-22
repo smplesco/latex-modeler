@@ -1,0 +1,18 @@
+// Solid of revolution — the region under y = √x swept around the x-axis; the disc method gives its volume.
+page("A5", "paper")
+duration(8)
+ph = 2 * pi * smoothstep(0, 6, t)     // how far the region has turned
+
+tex("\textbf{Solid of revolution}", (74, 196), {size: 16})
+tex("V = \pi\int_0^4 \big(\sqrt{x}\big)^2\,dx = 8\pi \approx 25.13", (74, 186), {size: 11})
+
+B = frame3d((74, 102), 84, (0, 4.2), (-2.2, 2.2), (-2.2, 2.2), {equal: true, labels: ["x", "y", "z"], ticks: 4, yaw: rad(-38)})
+f(x) = sqrt(x)
+psurf(B, (x, v) => (x, f(x) * cos(v), f(x) * sin(v)), (0, 4), (0, max(ph, 0.01)), {n: 40, nv: 48, colormap: "warm", colorBy: "u", opacity: 0.85})
+pplot(B, x => (x, f(x), 0), (0, 4), {width: 0.6, color: "#d64545"})
+
+// one disc slice of thickness dx
+x0 = 2.6
+pplot(B, s => (x0, f(x0) * cos(s), f(x0) * sin(s)), (0, 2 * pi), {width: 0.5, color: "#2b6cb0"})
+line(B.map((x0, 0, 0)), B.map((x0, f(x0), 0)), {width: 0.35, color: "#2b6cb0"})
+tex("dV = \pi\,f(x)^2\,dx", (74, 24), {size: 11, color: "#2b6cb0"})

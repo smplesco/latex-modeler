@@ -1,0 +1,34 @@
+// Projectile motion — a ball launched at 55° with its velocity components, the path, the peak and the range.
+page("A5 landscape", "paper")
+g = 9.81
+v0 = 20
+al = rad(55)
+T = 2 * v0 * sin(al) / g          // time of flight
+duration(T)
+pos(s) = (v0 * cos(al) * s, v0 * sin(al) * s - g * s^2 / 2)
+vel(s) = (v0 * cos(al), v0 * sin(al) - g * s)
+
+tex("\textbf{Projectile motion}", (16, 138), {size: 15, anchor: "w"})
+tex("v_0 = 20\,\mathrm{m/s}, \quad \alpha = 55^\circ, \quad g = 9.81\,\mathrm{m/s^2}", (16, 129), {size: 9.5, anchor: "w", color: "#555"})
+
+F = frame2d((16, 22), (180, 92), (0, 41), (0, 17), {xlabel: "x\ (\mathrm{m})", ylabel: "y\ (\mathrm{m})"})
+pplot(F, pos, (0, T), {color: "#bbb", width: 0.3, dash: 1})
+pplot(F, pos, (0, max(t, 0.001)), {color: "#2b6cb0", width: 0.55})
+
+// the peak and the range
+Hm = (v0 * sin(al))^2 / (2 * g)
+Rg = v0^2 * sin(2 * al) / g
+line(F.map((Rg / 2, 0)), F.map((Rg / 2, Hm)), {dash: 0.8, width: 0.2, color: "#888"})
+tex("H = \frac{v_0^2\sin^2\alpha}{2g} = " + fmt(Hm, 1) + "\,\mathrm{m}", F.map((Rg / 2 + 1, Hm + 1.4)), {size: 8.5, anchor: "w"})
+tex("R = " + fmt(Rg, 1) + "\,\mathrm{m}", F.map((Rg, 1.3)), {size: 8.5})
+
+// the ball and its velocity (arrows scaled by 0.35 s)
+P = pos(t)
+V = 0.35 * vel(t)
+arrow(F.map(P), F.map(P + (V.x, 0)), {color: "#2e9e6a", width: 0.4})
+arrow(F.map(P), F.map(P + (0, V.y)), {color: "#d64545", width: 0.4})
+arrow(F.map(P), F.map(P + V), {width: 0.5})
+dot(F.map(P), {r: 1.6, color: "#2b6cb0"})
+tex("v_x", F.map(P + (V.x + 1, -0.6)), {size: 8.5, color: "#2e9e6a"})
+tex("v_y", F.map(P + (-1.3, V.y)), {size: 8.5, color: "#d64545"})
+tex("t = " + fmt(t, 2) + "\,\mathrm{s}", (196, 129), {size: 9.5, anchor: "e"})

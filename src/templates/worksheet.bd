@@ -1,0 +1,21 @@
+// Worksheet — engineering graph paper on a desk, with blank axes to fill in. US Letter size.
+page("letter", "graph", {stage: "desk"})
+set({color: "#17251d"})
+
+tex("\textbf{Worksheet 4}\;\cdot\;\textbf{Quadratic functions}", (18, 262), {size: 16, anchor: "w"})
+text("Name: ______________________    Period: ____", (198, 262), {size: 10, anchor: "e"})
+line((18, 255), (198, 255), {width: 0.35})
+
+q(k, s, y) = tex("\textbf{" + str(k) + ".}\;" + s, (18, y), {size: 11.5, anchor: "w"})
+blank(x, y) = frame2d((x, y), (78, 62), (-5, 5), (-5, 5), {equal: true, labelSize: 7})
+
+q(1, "\text{Sketch } y = x^2 - 2x - 3. \text{ Mark the roots and the vertex.}", 244)
+blank(26, 168)
+tex("\text{roots: }\underline{\qquad\qquad}\quad \text{vertex: }\underline{\qquad\qquad}", (150, 205), {size: 10.5})
+
+q(2, "\text{Sketch } y = -\tfrac12 (x + 1)^2 + 4. \text{ What is its maximum?}", 156)
+blank(26, 80)
+tex("\text{maximum: }\underline{\qquad\qquad}", (150, 117), {size: 10.5})
+
+q(3, "\text{Solve } x^2 + 4x + 1 = 0 \text{ by completing the square.}", 66)
+tex("x^2 + 4x + 1 = (x + \underline{\quad})^2 - \underline{\quad}", (60, 50), {size: 11.5})

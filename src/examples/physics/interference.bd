@@ -1,0 +1,19 @@
+// Two-source interference — circular waves from two points add up into bright and dark fringes.
+page("A5", "paper")
+duration(4)
+
+tex("\textbf{Two-source interference}", (74, 196), {size: 16})
+tex("z = \sin(k r_1 - \omega t) + \sin(k r_2 - \omega t)", (74, 186), {size: 10.5, color: "#555"})
+
+d = 1.6        // half the distance between the sources
+k = 3.2
+w = 2 * pi / 2
+r1(x, y) = sqrt((x - d)^2 + y^2)
+r2(x, y) = sqrt((x + d)^2 + y^2)
+z(x, y) = (sin(k * r1(x, y) - w * t) + sin(k * r2(x, y) - w * t)) / (1 + 0.08 * (r1(x, y) + r2(x, y)))
+B = frame3d((74, 102), 100, (-6, 6), (-6, 6), (-2, 2), {labels: ["x", "y", "z"], zscale: 0.4, ticks: 4})
+splot(B, z, {n: 130, colormap: "ocean", wire: 0, floor: false})
+pplot(B, s => (d, 0, 2 * s - 2), (0, 1), {color: "#d64545", width: 0.5})      // the two sources, as posts
+pplot(B, s => (-d, 0, 2 * s - 2), (0, 1), {color: "#d64545", width: 0.5})
+
+tex("\text{bright fringes where } |r_1 - r_2| = n\lambda, \text{ dark where } |r_1 - r_2| = (n + \tfrac12)\lambda", (74, 26), {size: 8.5, color: "#555"})

@@ -1,0 +1,12 @@
+// Ripple tank — a damped circular wave travelling outward, on a dark page. Press play.
+page("A5", "dark")
+duration(5)
+
+tex("\textbf{Ripple tank}", (74, 196), {size: 17})
+tex("z = e^{-r/6}\cos(2r - \omega t), \quad r = \sqrt{x^2 + y^2}", (74, 186), {size: 10.5, color: "#a9b6cc"})
+
+B = frame3d((74, 100), 100, (-6, 6), (-6, 6), (-1, 1), {labels: ["x", "y", "z"], zscale: 0.45, ticks: 4})
+wave(x, y) = exp(-sqrt(x^2 + y^2) / 6) * cos(2 * sqrt(x^2 + y^2) - 2 * pi * t / 2.5)
+splot(B, wave, {n: 120, colormap: "ocean", wire: 0, levels: 6})
+
+tex("\text{orbit the view, or open it in the explorer and probe the surface}", (74, 24), {size: 8.5, color: "#8792a6"})

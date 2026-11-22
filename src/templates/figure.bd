@@ -1,0 +1,7 @@
+// Floating figure — no paper at all: the figure floats on a white background. Good for slides and posts.
+page("square", "paper", {stage: "float"})
+duration(10)
+
+B = frame3d((100, 104), 150, (-3, 3), (-3, 3), (-1.2, 1.2), {labels: ["x", "y", "z"], ticks: 5})
+splot(B, (x, y) => sin(sqrt(x^2 + y^2) * 1.8 - 2 * pi * t / 5) / (1 + 0.25 * (x^2 + y^2)), {n: 90, colormap: "ocean", wire: 18})
+tex("z = \dfrac{\sin\!\left(1.8\,r - \omega t\right)}{1 + r^2/4}", (100, 22), {size: 14})

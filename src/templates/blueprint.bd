@@ -1,0 +1,62 @@
+// Blueprint — an engineering sheet (A3 landscape) with orthographic views, an isometric 3D view and a title block.
+page("A3 landscape", "blueprint", {stage: "studio"})
+ink = "#e8f1ff"
+dim = "#9cc3f0"
+set({color: ink, width: 0.35})
+
+// ---- part: a 80 × 50 × 20 block with a Ø24 bore, drawn at 1:1
+L = 80
+Wd = 50
+H = 20
+R = 12
+dimx(p, q, lbl, off) = {        // horizontal dimension
+  arrow(p + (0, off), q + (0, off), {both: true, width: 0.2, color: dim})
+  line(p, p + (0, off + 2 * sign(off)), {width: 0.15, color: dim})
+  line(q, q + (0, off + 2 * sign(off)), {width: 0.15, color: dim})
+  tex(lbl, (p + q) / 2 + (0, off + 3.2 * sign(off)), {size: 9, color: dim})
+}
+dimy(p, q, lbl, off) = {        // vertical dimension
+  arrow(p + (off, 0), q + (off, 0), {both: true, width: 0.2, color: dim})
+  line(p, p + (off + 2 * sign(off), 0), {width: 0.15, color: dim})
+  line(q, q + (off + 2 * sign(off), 0), {width: 0.15, color: dim})
+  tex(lbl, (p + q) / 2 + (off + 5 * sign(off), 0), {size: 9, color: dim})
+}
+
+// top view
+T = (60, 150)
+rect(T, (L, Wd))
+circle(T + (L / 2, Wd / 2), R)
+line(T + (L / 2 - R - 5, Wd / 2), T + (L / 2 + R + 5, Wd / 2), {dash: 1.5, width: 0.15, color: dim})
+line(T + (L / 2, Wd / 2 - R - 5), T + (L / 2, Wd / 2 + R + 5), {dash: 1.5, width: 0.15, color: dim})
+dimx(T + (0, Wd), T + (L, Wd), "80", 10)
+dimy(T, T + (0, Wd), "50", -10)
+tex("\varnothing\,24", T + (L / 2 + R + 9, Wd / 2 + 9), {size: 9, color: dim})
+text("TOP", T + (L / 2, -9), {size: 9})
+
+// front view (hidden bore dashed)
+Fv = (60, 90)
+rect(Fv, (L, H))
+line(Fv + (L / 2 - R, 0), Fv + (L / 2 - R, H), {dash: 1.2, width: 0.25})
+line(Fv + (L / 2 + R, 0), Fv + (L / 2 + R, H), {dash: 1.2, width: 0.25})
+dimy(Fv, Fv + (0, H), "20", -10)
+text("FRONT", Fv + (L / 2, -9), {size: 9})
+
+// isometric view: real 3D, orbit to turn the part
+pr = onpage(iso(), (265, 150), 0.95)
+box = [(0, 0, 0), (L, 0, 0), (L, Wd, 0), (0, Wd, 0)]
+up(p) = p + (0, 0, H)
+face(ps) = poly(map(ps, p => pr(p)), {fill: "#2c64a8", opacity: 0.85, stroke: ink, width: 0.3})
+face(box)
+face(map(box, p => up(p)))
+for i in 0..4 { j = (i + 1) % 4; face([box[i], box[j], up(box[j]), up(box[i])]) }
+curve(s => pr((L / 2 + R * cos(s), Wd / 2 + R * sin(s), H + 0.05)), 0, 2 * pi, {width: 0.35})
+curve(s => pr((L / 2 + R * cos(s), Wd / 2 + R * sin(s), -0.05)), 0, 2 * pi, {width: 0.2, dash: 1})
+text("ISOMETRIC", (265, 95), {size: 9})
+
+// ---- title block
+rect((290, 12), (118, 40), {width: 0.4})
+line((290, 32), (408, 32), {width: 0.25})
+line((350, 12), (350, 32), {width: 0.25})
+tex("\textbf{BORED MOUNTING BLOCK}", (349, 42), {size: 13})
+text("SCALE 1:1 · mm", (320, 22), {size: 9})
+text("DWG 001 · REV A", (379, 22), {size: 9})

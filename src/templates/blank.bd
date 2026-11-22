@@ -1,0 +1,7 @@
+// Blank page — a sheet of A4 paper floating in a dark studio. The classic LaTeX Modeler look.
+// Write marks below; the page redraws as you type. The Reference tab (bottom panel) lists everything.
+page("A4", "paper", {stage: "studio"})
+
+tex("\textbf{Untitled}", (105, 272), {size: 22})
+tex("\text{Start writing here: tex(), line(), frame2d(), frame3d()}\;\dots", (105, 262), {size: 10, color: "#8a8a8a"})
+line((20, 255), (190, 255), {width: 0.3})

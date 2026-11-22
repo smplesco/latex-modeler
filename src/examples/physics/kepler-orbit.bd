@@ -1,0 +1,37 @@
+// Kepler's second law — a planet on an ellipse sweeps out equal areas in equal times.
+page("A5", "paper")
+duration(10)
+
+tex("\textbf{Kepler's second law}", (74, 196), {size: 16})
+tex("\text{the line to the Sun sweeps equal areas in equal times}", (74, 187), {size: 9, color: "#666"})
+
+a = 1
+e = 0.62
+b = a * sqrt(1 - e^2)
+F = frame2d((14, 70), (120, 100), (-1.75, 0.55), (-0.95, 0.95), {equal: true, axes: false, grid: false})
+
+// position after a fraction u of the period: solve Kepler's equation M = E - e sin E (Newton's method)
+orbit(u) = {
+  M = 2 * pi * u
+  E = M + e * sin(M)
+  for i in 0..8 { E = E - (E - e * sin(E) - M) / (1 - e * cos(E)) }
+  (a * (cos(E) - e), b * sin(E))
+}
+curve(s => F.map((a * cos(s) - a * e, b * sin(s))), 0, 2 * pi, {width: 0.35})
+
+// six sectors, each swept in a sixth of the period
+for j in 0..6 {
+  u0 = j / 6
+  pts = [F.map((0, 0))]
+  for i in 0..25 { pts = pts + [F.map(orbit(u0 + i / 24 / 6))] }
+  poly(pts, {fill: hsl(30 + 50 * j, 70, 60), opacity: 0.45})
+}
+u = t / 10
+P = orbit(u)
+line(F.map((0, 0)), F.map(P), {width: 0.3})
+dot(F.map((0, 0)), {r: 2.6, color: "#f2a93b"})
+dot(F.map(P), {r: 1.5, color: "#2b6cb0"})
+tex("\text{Sun}", F.map((0.1, -0.12)), {size: 8, color: "#9a6a12"})
+
+tex("e = 0.62 \quad\Rightarrow\quad \frac{v_{\text{perihelion}}}{v_{\text{aphelion}}} = \frac{1 + e}{1 - e} \approx " + fmt((1 + e) / (1 - e), 2), (74, 48), {size: 10})
+tex("\frac{dA}{dt} = \frac{L}{2m} = \text{const}", (74, 32), {size: 11})

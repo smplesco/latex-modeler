@@ -9,6 +9,10 @@ import { texReady, measureTex, previewSVG, getTex, recordTex, stopRecordingTex }
 import { exportSVG } from './render/export';
 import { Editor } from './editor/editor';
 import { MODEL_EXAMPLES } from './model/examples';
+import { EXAMPLES as LIBRARY, byKey, type LibItem } from './library';
+import { PAGES, PAGE_STYLES, STAGES } from './lang/pages';
+import { Home } from './ui/home';
+import { Thumbs } from './ui/thumbs';
 import type { ModelResult } from './model/generate';
 import { getPlatform, Platform } from './platform';
 import { REFERENCE } from './ui/reference';
@@ -17,32 +21,40 @@ import { record, supportedFormats, type RecFormat } from './render/record';
 import type { Explorer } from './explore/explorer';
 import { FigureChips, type ExploreTarget } from './explore/chips';
 
-import stressSrc from './examples/stress-tensor.bd?raw';
-import helixSrc from './examples/frenet-helix.bd?raw';
-import saddleSrc from './examples/saddle.bd?raw';
-import tourSrc from './examples/plotting-tour.bd?raw';
-
-const EXAMPLES: Record<string, string> = {
-  'stress-tensor.bd': stressSrc, 'plotting-tour.bd': tourSrc, 'frenet-helix.bd': helixSrc, 'saddle.bd': saddleSrc,
-};
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 // ------------------------------------------------------------------ documents
-interface Doc { id: string; name: string; text: string; saved: string; path?: string; example?: boolean }
-const STORE = 'bdraw.session.v2';
-let docs: Doc[] = [], current = '';
+// example docs remember which library page they came from (src), so they can be reverted and stay clean until edited
+interface Doc { id: string; name: string; text: string; saved: string; path?: string; example?: boolean; src?: string }
+const STORE = 'lm.session.v3', OLD_STORE = 'bdraw.session.v2';
+let docs: Doc[] = [], current = '';          // current = '' → the start screen
+const original = (d: Doc) => (d.example ? byKey(d.src)?.src : undefined);
 function loadSession() {
-  try { const s = JSON.parse(localStorage.getItem(STORE) || 'null'); if (s && Array.isArray(s.docs)) { docs = s.docs; current = s.current; } } catch { /* ignore */ }
-  for (const [name, text] of Object.entries(EXAMPLES)) if (!docs.some(d => d.example && d.name === name)) docs.push({ id: 'ex:' + name, name, text, saved: text, example: true });
-  docs.sort((a, b) => (a.example === b.example ? 0 : a.example ? -1 : 1));
-  if (!docs.some(d => d.id === current)) current = docs[0].id;
-  try { const h = decodeURIComponent(location.hash.slice(1)); const d = docs.find(x => x.name.replace(/\.bd$/, '') === h); if (d) current = d.id; } catch { /* ignore */ }
+  let saved: Doc[] = [], migrating = false;
+  try {
+    let raw = localStorage.getItem(STORE);
+    if (raw === null) { raw = localStorage.getItem(OLD_STORE); migrating = raw !== null; }
+    const s = JSON.parse(raw || 'null'); if (s && Array.isArray(s.docs)) saved = s.docs;
+  } catch { /* ignore */ }
+  for (const d of saved) {
+    if (!d || typeof d.text !== 'string' || typeof d.name !== 'string') continue;
+    if (d.example) {
+      // older versions kept every example open by name; now examples open only when asked, from their folder
+      d.src ??= LIBRARY.find(e => e.file === d.name)?.key;
+      const orig = original(d);
+      if (orig === undefined) { d.example = false; d.saved = ''; }      // the example is gone: keep the edits as an unsaved page
+      else if (migrating && d.text === orig) continue;                  // examples the old version opened by itself
+    }
+    docs.push(d);
+  }
+  if (migrating) { try { localStorage.removeItem(OLD_STORE); } catch { /* ignore */ } persist(); }
 }
 let saveTimer = 0;
 function persist() { clearTimeout(saveTimer); saveTimer = window.setTimeout(() => { try { localStorage.setItem(STORE, JSON.stringify({ docs, current })); } catch { /* ignore */ } }, 300); }
-const doc = () => docs.find(d => d.id === current)!;
-const isDirty = (d: Doc) => (d.example ? d.text !== EXAMPLES[d.name] : d.text !== d.saved);
+const doc = (): Doc | undefined => docs.find(d => d.id === current);
+const isDirty = (d: Doc) => (d.example ? d.text !== original(d) : d.text !== d.saved);
+const slug = (name: string) => name.replace(/\.bd$/, '').replace(/[^A-Za-z0-9-]/g, '-');
 
 // ------------------------------------------------------------------ UI objects
 let platform: Platform;
@@ -55,14 +67,14 @@ const getExplorer = () => (explorerLoad ??= import('./explore/explorer').then(m 
   source: () => editor.value,
   time: () => tCur,
   measure: measureTex,
-  title: () => doc().name,
+  title: () => doc()?.name ?? 'page.bd',
   writeBack: (name, value, line) => {
     const lines = editor.value.split('\n'); const L = lines[line - 1] ?? '';
     const m = new RegExp('^(\\s*' + name + '\\s*=\\s*)(-?[0-9.eE+]+)').exec(L);
     if (!m) { toast(`couldn't find "${name} = …" on line ${line}`); return; }
     lines[line - 1] = m[1] + String(+value.toPrecision(6)) + L.slice(m[0].length);
     const pos = editor.ta.selectionStart; editor.value = lines.join('\n'); editor.ta.setSelectionRange(pos, pos);
-    doc().text = editor.value; persist(); updateTabs(); compile(false);
+    const d = doc(); if (d) d.text = editor.value; persist(); updateTabs(); compile(false);
     toast(`${name} = ${+value.toPrecision(6)} written to line ${line}`);
   },
   snapshot: (url, name) => exportImage(url, name),
@@ -73,50 +85,104 @@ const chips = new FigureChips($('gl'), viewer, openExplore);
 
 function updateTabs() {
   const tabs = $('tabs'); tabs.innerHTML = '';
+  const home = document.createElement('div');
+  home.className = 'tab home' + (current ? '' : ' act'); home.title = 'Start screen: templates and examples';
+  home.innerHTML = '<svg viewBox="0 0 16 16"><path d="M2 7.5 8 2.5l6 5M3.8 6.2V13.5h3V10h2.4v3.5h3V6.2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg><span>Home</span>';
+  home.onclick = () => showHome();
+  tabs.appendChild(home);
   for (const d of docs) {
     const el = document.createElement('div');
     el.className = 'tab' + (d.id === current ? ' act' : '') + (isDirty(d) ? ' modified' : '');
-    el.innerHTML = `<span class="ic">bd</span><span>${esc(d.name)}</span>${d.example ? '<span class="x" title="modified example"><span></span></span>' : '<span class="x" title="Close"><span>×</span></span>'}`;
-    el.onclick = (e) => { if ((e.target as HTMLElement).closest('.x') && !d.example) { closeDoc(d); return; } openDoc(d.id); };
+    el.title = d.example ? `example · ${d.src?.replace(/^examples\//, '')}` : d.path ?? 'not saved to a file yet';
+    el.innerHTML = `<span class="ic">bd</span><span>${esc(d.name)}</span><span class="x" title="Close"><span>×</span></span>`;
+    el.onclick = (e) => { if ((e.target as HTMLElement).closest('.x')) { closeDoc(d); return; } openDoc(d.id); };
+    el.onauxclick = (e) => { if (e.button === 1) { e.preventDefault(); closeDoc(d); } };   // middle-click closes, like a browser
     tabs.appendChild(el);
   }
+  tabs.querySelector('.act')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   const d = doc();
-  $('crumbDir').textContent = d.example ? 'examples' : d.path ? 'file' : 'unsaved';
+  $('app').classList.toggle('at-home', !d);
+  if (!d) { platform?.setTitle('LaTeX Modeler'); return; }
+  const folder = d.example && d.src ? d.src.split('/').slice(1, -1).join(' › ') : '';
+  $('crumbDir').textContent = d.example ? 'examples' + (folder ? ' › ' + folder : '') : d.path ? 'file' : 'unsaved';
   $('crumbName').textContent = d.name;
   $('crumbPath').textContent = d.path ?? '';
   $('bRevert').style.display = d.example ? '' : 'none';
   platform?.setTitle(`${d.name}${isDirty(d) ? ' •' : ''} — LaTeX Modeler`);
 }
+function setHash(h: string) { try { history.replaceState(null, '', h ? '#' + h : location.pathname + location.search); } catch { /* ignore */ } }
 function openDoc(id: string) {
-  current = id; editor.value = doc().text;
-  try { history.replaceState(null, '', '#' + doc().name.replace(/\.bd$/, '').replace(/[^A-Za-z0-9-]/g, '-')); } catch { /* ignore */ }
+  const d = docs.find(x => x.id === id); if (!d) { showHome(); return; }
+  const leaving = !current; current = id;
+  home?.el.classList.remove('show');
   updateTabs(); persist();
+  editor.value = d.text;
+  setHash(slug(d.name));
+  if (leaving) { viewer.resize(); editor.refresh(); }
   tCur = 0; firstFit = true; compile(true);
 }
-function addDoc(name: string, text: string, path?: string, saved = text) {
-  let n = name, k = 2; while (docs.some(d => d.name === n && d.path === path)) n = name.replace(/(\.bd)?$/, `-${k++}.bd`);
-  const d: Doc = { id: 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: n, text, saved, path };
+function showHome() {
+  if (playing) setPlaying(false);
+  current = ''; setHash('');
+  lookPop.classList.remove('show'); $('bLook').classList.remove('on');
+  if (explorer?.isOpen) explorer.close();
+  updateTabs(); persist();
+  home.refresh(); home.el.classList.add('show'); home.el.scrollTop = 0;
+  status('ready'); problems = []; renderPanel();
+}
+function addDoc(name: string, text: string, path?: string, saved = text, extra: Partial<Doc> = {}) {
+  let n = name, k = 2; while (docs.some(d => d.name === n && d.path === path)) n = name.replace(/(-\d+)?(\.bd)?$/, `-${k++}.bd`);
+  const d: Doc = { id: 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: n, text, saved, path, ...extra };
   docs.push(d); openDoc(d.id); return d;
+}
+/** open an example from the library (or switch to it if it's already open) */
+function openExample(e: LibItem) {
+  const open = docs.find(d => d.example && d.src === e.key);
+  if (open) { openDoc(open.id); return; }
+  addDoc(e.file, e.src, undefined, e.src, { example: true, src: e.key });
 }
 async function closeDoc(d: Doc) {
   if (isDirty(d)) {
-    const r = await ask(`Close “${d.name}”?`, 'It has changes that are not saved to a file.', ['Cancel', 'Save', 'Close without saving']);
+    const r = await ask(`Close “${d.name}”?`, d.example ? 'You changed this example. Closing it throws your changes away (the example itself is kept).' : 'It has changes that are not saved to a file.',
+      ['Cancel', d.example ? 'Save a copy' : 'Save', 'Close without saving']);
     if (r === 'Cancel' || r === null) return;
-    if (r === 'Save' && !(await saveDoc(d))) return;
+    if (r !== 'Close without saving' && !(await saveDoc(d))) return;
   }
+  const i = docs.indexOf(d); if (i < 0) return;
   docs = docs.filter(x => x !== d);
-  if (current === d.id) openDoc(docs[docs.length - 1].id); else { updateTabs(); persist(); }
+  if (current === d.id) { const next = docs[Math.min(i, docs.length - 1)]; next ? openDoc(next.id) : showHome(); }
+  else { updateTabs(); persist(); }
 }
 async function saveDoc(d = doc(), saveAs = false): Promise<boolean> {
+  if (!d) { toast('open a page first'); return false; }
   try {
     const r = await platform.saveFile(d.name, d.text, d.example ? undefined : d.path, saveAs || !!d.example);
     if (!r) return false;
-    if (d.example) { addDoc(r.name, d.text, r.path); d.text = EXAMPLES[d.name]; }
+    if (d.example) {   // an example is never overwritten: the saved file becomes its own page and the example goes back to normal
+      const text = d.text; d.text = original(d) ?? d.text;
+      const i = docs.indexOf(d); const nd: Doc = { id: 'd' + Date.now().toString(36), name: r.name, text, saved: text, path: r.path };
+      docs.splice(i + 1, 0, nd); if (current === d.id) openDoc(nd.id);
+      if (d.text === original(d) && i >= 0) docs.splice(i, 1);   // the untouched example tab isn't needed any more
+    }
     else { d.name = r.name; d.path = r.path; d.saved = d.text; }
     updateTabs(); persist(); toast(platform.kind === 'desktop' ? `saved ${r.path ?? r.name}` : `downloaded ${r.name}`);
     return true;
   } catch (e: any) { toast('save failed: ' + (e.message || e)); return false; }
 }
+
+// ---- the start screen
+const thumbs = new Thumbs();
+const home = new Home($('app'), {
+  thumbs,
+  openDocs: () => docs.map(d => ({ id: d.id, name: d.name, text: d.text, dirty: isDirty(d), where: d.example ? 'example · ' + (byKey(d.src)?.title ?? '') : d.path ?? 'not saved to a file yet' })),
+  resume: id => openDoc(id),
+  create: (name, src) => { addDoc(name, src, undefined, src); },
+  openExample,
+  model: tex => { mIn.value = tex; modelIt(); },
+  openFile: () => $('bOpen').click(),
+  quickEquations: ['ripple', 'heart', 'torus', 'helix', 'rotation field', 'logistic ODE', 'Gaussian integral', 'limit: sin x / x', 'Basel series'].map(l => MODEL_EXAMPLES.find(e => e.label === l)!).filter(Boolean),
+});
+home.el.classList.add('show');
 
 // ------------------------------------------------------------------ modal / toast
 function modal(html: string) { $('mbox').innerHTML = html; $('modal').classList.add('show'); }
@@ -157,6 +223,7 @@ function flashStatus(msg: string) { $('sMsg').textContent = msg; clearTimeout(st
 let tCur = 0, duration = 6, playing = false, usesT = false, lastCtx: RunCtx | null = null, firstFit = true, followCam = true;
 const slider = $<HTMLInputElement>('slider');
 function compile(force: boolean) {
+  if (!current) return false;
   const t0 = performance.now();
   let ctx: RunCtx;
   try { ctx = runProgram(editor.value, tCur, { measure: measureTex }); }
@@ -179,6 +246,7 @@ function compile(force: boolean) {
   $('sObj').textContent = `${ctx.prims.length} marks`;
   $('sTime').textContent = `${(performance.now() - t0).toFixed(0)} ms`;
   status(warnings.length ? `⚠ ${warnings.length} warning${warnings.length > 1 ? 's' : ''}` : '✓ compiled');
+  if (lookPop.classList.contains('show')) renderLook();
   if (firstFit) { firstFit = false; viewer.place(0, 0, 1); }
   else if (followCam && ctx.cam && force) applyCam();
   updateTime();
@@ -253,10 +321,62 @@ editor.ta.addEventListener('focus', () => { if (!hoverRec) viewer.highlight(edit
 // editor changes
 let compileTimer = 0;
 editor.onChange = () => {
-  const d = doc(); d.text = editor.value; persist(); updateTabs();
+  const d = doc(); if (!d) return; d.text = editor.value; persist(); updateTabs();
   clearTimeout(compileTimer); compileTimer = window.setTimeout(() => compile(false), 260);
 };
 editor.onRun = () => compile(true);
+
+// ------------------------------------------------------------------ page look: size, paper and stage
+const lookPop = $('lookPop');
+const near = (a: number, b: number) => Math.abs(a - b) < 0.6;
+function sizeKey(p: { w: number; h: number }): string {
+  for (const [k, [w, h]] of Object.entries(PAGES)) { if (near(w, p.w) && near(h, p.h)) return k; if (near(h, p.w) && near(w, p.h)) return k + ' landscape'; }
+  return '';
+}
+const SIZE_MENU: [string, string][] = [['A4', 'A4'], ['A4 landscape', 'A4 ⟷'], ['A5', 'A5'], ['A5 landscape', 'A5 ⟷'], ['A3', 'A3'], ['A3 landscape', 'A3 ⟷'], ['letter', 'Letter'], ['slide', 'Slide 16:9'], ['square', 'Square']];
+function renderLook() {
+  const pg = lastCtx?.page;
+  if (!pg) { lookPop.innerHTML = '<div class="note">Fix the errors in the code first.</div>'; return; }
+  const cur = { size: sizeKey(pg), style: pg.style, stage: pg.stage || 'studio' };
+  const row = (kind: string, items: [string, string, string?][]) => `<div class="row">${items.map(([v, l, extra]) => `<button class="chip${(cur as any)[kind] === v ? ' on' : ''}" data-k="${kind}" data-v="${esc(v)}"${extra ? ` title="${esc(extra)}"` : ''}>${l}</button>`).join('')}</div>`;
+  lookPop.innerHTML = `<h4>Size</h4>${row('size', SIZE_MENU.map(([v, l]) => [v, esc(l)]))}
+    <h4>Paper</h4>${row('style', Object.entries(PAGE_STYLES).map(([k, s]) => [k, `<span class="sw" style="background:${s.bg}"></span>${esc(s.label)}`]))}
+    <h4>Stage</h4>${row('stage', Object.entries(STAGES).map(([k, s]) => [k, esc(s.label), s.about]))}
+    <div class="note">Changes the <code>page(…)</code> line in your code — undo with Ctrl+Z.${cur.size ? '' : ' This page has a custom size.'}</div>`;
+  lookPop.querySelectorAll<HTMLElement>('.chip').forEach(b => b.onclick = () => setPageOpt(b.dataset.k as any, b.dataset.v!));
+}
+function setPageOpt(kind: 'size' | 'style' | 'stage', value: string) {
+  const pg = lastCtx?.page; if (!pg) return;
+  const cur = { size: sizeKey(pg), style: pg.style, stage: pg.stage || 'studio' }; cur[kind] = value;
+  const sizeLit = cur.size ? `"${cur.size}"` : `(${+pg.w.toFixed(2)}, ${+pg.h.toFixed(2)})`;
+  const call = `page(${sizeLit}, "${cur.style}"${cur.stage !== 'studio' ? `, {stage: "${cur.stage}"}` : ''})`;
+  const text = editor.value, lines = text.split('\n');
+  const idx = lines.findIndex(l => /^\s*page\s*\(/.test(l));
+  let from: number, to: number, insert: string;
+  if (idx >= 0) {
+    const m = /^(\s*)page\s*\((.*)\)(\s*\/\/.*)?\s*$/.exec(lines[idx]);
+    const simple = m && /^\s*("[^"]*"|\(\s*[-\d.]+\s*,\s*[-\d.]+\s*\))?\s*(,\s*"[^"]*"\s*)?(,\s*\{\s*stage\s*:\s*"[^"]*"\s*\}\s*)?$/.test(m[2]);
+    if (!m || !simple) { toast('the page(…) line uses code here — change it by hand'); editor.goTo(idx + 1); return; }
+    from = lines.slice(0, idx).join('\n').length + (idx ? 1 : 0); to = from + lines[idx].length;
+    insert = m[1] + call + (m[3] ?? '');
+  } else {   // no page() yet: add one after the opening comments
+    let k = 0; while (k < lines.length && /^\s*\/\//.test(lines[k])) k++;
+    from = to = lines.slice(0, k).join('\n').length + (k ? 1 : 0); insert = call + '\n';
+  }
+  // insert through the browser's editing command so Ctrl+Z can undo it
+  const ta = editor.ta, had = document.activeElement;
+  let done = false;
+  if (!matchMedia('(pointer: coarse)').matches) {
+    try { ta.focus({ preventScroll: true }); ta.setSelectionRange(from, to); done = document.execCommand('insertText', false, insert); } catch { done = false; }
+    if (had instanceof HTMLElement && had !== ta) had.focus({ preventScroll: true }); else ta.blur();
+  }
+  if (!done || editor.value === text) { editor.value = text.slice(0, from) + insert + text.slice(to); }
+  const d = doc(); if (d) d.text = editor.value; persist(); updateTabs();
+  firstFit = true; compile(true); renderLook();
+}
+$('bLook').onclick = (e) => { e.stopPropagation(); const open = !lookPop.classList.contains('show'); lookPop.classList.toggle('show', open); $('bLook').classList.toggle('on', open); if (open) renderLook(); };
+lookPop.addEventListener('pointerdown', e => e.stopPropagation());
+document.addEventListener('pointerdown', e => { if (lookPop.classList.contains('show') && !(e.target as HTMLElement).closest('#lookPop, #bLook')) { lookPop.classList.remove('show'); $('bLook').classList.remove('on'); } });
 
 // ------------------------------------------------------------------ auto-model bar
 let modelWarnings: string[] = [];
@@ -302,19 +422,21 @@ async function modelIt() {
 }
 
 // ------------------------------------------------------------------ files & export
-$('bNew').onclick = () => addDoc('untitled.bd', 'page("A4", "paper")\n\ntex("\\\\textbf{Untitled}", (105, 270), {size: 20})\n', undefined, '');
+$('bNew').onclick = () => { showHome(); requestAnimationFrame(() => home.scrollToTemplates()); };
 $('bOpen').onclick = async () => {
   try { const f = await platform.openFile(); if (!f) return; const ex = docs.find(d => d.path && d.path === f.path); if (ex) { openDoc(ex.id); return; } addDoc(f.name, f.text, f.path); }
   catch (e: any) { toast('open failed: ' + (e.message || e)); }
 };
 $('bSave').onclick = (e) => saveDoc(doc(), (e as MouseEvent).shiftKey);
-$('bRevert').onclick = () => { const d = doc(); if (!d.example) return; d.text = EXAMPLES[d.name]; openDoc(d.id); };
+$('bRevert').onclick = () => { const d = doc(); const o = d && original(d); if (!d || o === undefined) return; d.text = o; openDoc(d.id); toast('back to the original example'); };
 const exportMenu = $('exportMenu');
 $('bExport').onclick = (e) => { if ((e.target as HTMLElement).closest('.menu')) return; exportMenu.classList.toggle('show'); };
 document.addEventListener('click', e => { if (!(e.target as HTMLElement).closest('#bExport')) exportMenu.classList.remove('show'); });
 exportMenu.querySelectorAll<HTMLElement>('div').forEach(el => el.onclick = (e) => { e.stopPropagation(); exportMenu.classList.remove('show'); doExport(el.dataset.x!); });
-const baseName = () => doc().name.replace(/\.bd$/, '');
+const baseName = () => (doc()?.name ?? 'page').replace(/\.bd$/, '');
+const docName = () => doc()?.name ?? 'page.bd';
 async function doExport(kind: string) {
+  if (!current) { toast('open a page first'); return; }
   if (!lastCtx) { toast('fix the errors first'); return; }
   if (kind === 'html') { await exportHTML(); return; }
   if (kind === 'share') { await exportShare(); return; }
@@ -411,8 +533,8 @@ async function exportHTML() {
   toast('building the interactive page…');
   let full: string, compact: string, complete = true;
   try {
-    full = await buildStandaloneHTML(doc().name, editor.value, 'full');
-    compact = await buildStandaloneHTML(doc().name, editor.value, 'compact');
+    full = await buildStandaloneHTML(docName(), editor.value, 'full');
+    compact = await buildStandaloneHTML(docName(), editor.value, 'compact');
     complete = (await collectLabels(editor.value)).complete;
   } catch (e: any) { toast('HTML export failed: ' + (e.message || e)); return; }
   const mb = (s: string) => (s.length / 1048576).toFixed(s.length < 1048576 ? 2 : 1);
@@ -497,7 +619,7 @@ function exportVideo() {
 // ---- share links: the page's code travels inside the link itself
 async function exportShare() {
   let url: string;
-  try { url = await shareLink(doc().name, editor.value); } catch (e: any) { toast('could not make a link: ' + (e.message || e)); return; }
+  try { url = await shareLink(docName(), editor.value); } catch (e: any) { toast('could not make a link: ' + (e.message || e)); return; }
   let copied = false; try { await navigator.clipboard.writeText(url); copied = true; } catch { /* blocked: the dialog lets them copy */ }
   const long = url.length > 8000;
   modal(`<h3>Share link</h3><p style="margin:4px 0 10px;line-height:1.5">${copied ? '<b>Copied.</b> ' : ''}Anyone who opens this link sees this page live in LaTeX Modeler and can orbit, explore and edit their own copy.
@@ -516,10 +638,16 @@ async function openShared(hash: string): Promise<boolean> {
   if (!sh) return false;
   const same = docs.find(d => d.text === sh!.source);
   if (same) openDoc(same.id); else addDoc(sh.name, sh.source, undefined, sh.source);
-  flashStatus('opened a shared page'); toast(`opened shared page “${doc().name}” — it's your own copy now`);
+  flashStatus('opened a shared page'); toast(`opened shared page “${docName()}” — it's your own copy now`);
   return true;
 }
-window.addEventListener('hashchange', () => { if (/^#s=/.test(location.hash)) openShared(location.hash); });
+window.addEventListener('hashchange', () => {
+  if (/^#s=/.test(location.hash)) { openShared(location.hash); return; }
+  let h = ''; try { h = decodeURIComponent(location.hash.slice(1)); } catch { return; }
+  if (!h) { if (current) showHome(); return; }
+  const open = docs.find(d => slug(d.name) === h), ex = LIBRARY.find(e => slug(e.file) === h || e.key === h);
+  if (open) { if (open.id !== current) openDoc(open.id); } else if (ex) openExample(ex);
+});
 
 async function exportImage(url: string, name: string) {
   const bin = atob(url.split(',')[1]); const u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
@@ -533,9 +661,10 @@ window.addEventListener('keydown', e => {
   const mod = e.ctrlKey || e.metaKey;
   if (mod && e.key.toLowerCase() === 's') { e.preventDefault(); saveDoc(doc(), e.shiftKey); return; }
   if (mod && e.key.toLowerCase() === 'o') { e.preventDefault(); $('bOpen').click(); return; }
-  if (mod && e.key.toLowerCase() === 'm') { e.preventDefault(); mIn.focus(); mIn.select(); return; }
+  if (mod && e.key.toLowerCase() === 'm') { e.preventDefault(); if (!current) home.focusEquation(); else { mIn.focus(); mIn.select(); } return; }
   if (mod && e.altKey && e.key.toLowerCase() === 'n') { e.preventDefault(); $('bNew').click(); return; }
-  if (e.key === 'Escape') { closeModal(); exportMenu.classList.remove('show'); }
+  if (e.key === 'Escape') { closeModal(); exportMenu.classList.remove('show'); lookPop.classList.remove('show'); $('bLook').classList.remove('on'); }
+  if (!current) return;   // the start screen has no viewer shortcuts
   const typing = document.activeElement === editor.ta || document.activeElement === mIn || (document.activeElement as HTMLElement)?.tagName === 'SELECT';
   if (typing || mod || e.altKey) return;
   if (e.code === 'Space') { e.preventDefault(); setPlaying(!playing); }
@@ -569,14 +698,24 @@ async function boot() {
   await texReady();
   $('loading').remove();
   loadSession();
+  // what to show first: a file the desktop app was opened with, a share link, a link to a page — otherwise the start screen
   const init = await platform.initialFile();
-  if (init) { const ex = docs.find(d => d.path === init.path); if (ex) current = ex.id; else { docs.push({ id: 'f' + Date.now(), name: init.name, text: init.text, saved: init.text, path: init.path }); current = docs[docs.length - 1].id; } }
-  editor.value = doc().text;
-  if (/^#s=/.test(location.hash)) await openShared(location.hash);
-  updateTabs(); renderPanel();
+  let target = '';
+  const shareHash = /^#s=/.test(location.hash) ? location.hash : '';
+  if (init) { const ex = docs.find(d => d.path === init.path); if (ex) target = ex.id; else { const d: Doc = { id: 'f' + Date.now(), name: init.name, text: init.text, saved: init.text, path: init.path }; docs.push(d); target = d.id; } }
+  else if (!shareHash) {
+    let h = ''; try { h = decodeURIComponent(location.hash.slice(1)); } catch { /* ignore */ }
+    if (h) {
+      const open = docs.find(d => slug(d.name) === h);
+      const ex = LIBRARY.find(e => slug(e.file) === h || e.key === h);
+      if (open) target = open.id; else if (ex) openExample(ex);
+    }
+  }
+  renderPanel();
   viewer.resize();
-  compile(true);
+  if (target) openDoc(target);
+  else if (!current && !(shareHash && await openShared(shareHash))) showHome();
   requestAnimationFrame(frame);
-  (window as any).__bdraw = { get explorer() { return explorer; }, openExplore, chips, compile, setTime, viewer, get autoModel() { return modeller?.autoModel; }, modelIt, get problems() { return problems; }, get ctx() { return lastCtx; }, exportSVG: () => lastCtx && exportSVG(lastCtx), openDoc, docs: () => docs };
+  (window as any).__bdraw = { get explorer() { return explorer; }, openExplore, chips, compile, setTime, viewer, get autoModel() { return modeller?.autoModel; }, modelIt, get problems() { return problems; }, get ctx() { return lastCtx; }, exportSVG: () => lastCtx && exportSVG(lastCtx), openDoc, docs: () => docs, load: (c: string) => addDoc('test.bd', c, undefined, c), showHome, home, thumbs, openExample };
 }
 boot().catch(e => { const l = $('loading'); if (l) l.innerHTML = `<div style="color:#f88;padding:20px">Failed to start: ${esc(String(e?.message || e))}</div>`; console.error(e); });

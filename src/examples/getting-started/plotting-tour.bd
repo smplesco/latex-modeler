@@ -1,4 +1,4 @@
-// plotting-tour.bd — the plotting library in one page.
+// Plotting tour — the plotting library in one page.
 // Every call below is what the LaTeX auto-modeller writes for you; mix them freely.
 page("A4", "paper")
 duration(6)

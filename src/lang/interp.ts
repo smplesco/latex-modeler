@@ -16,7 +16,7 @@ export class Env {
 
 export type Prim = any;
 export interface RunCtx {
-  prims: Prim[]; page: { w: number; h: number; style: string }; defaults: any; usesT: boolean; duration: number | null; cam: any;
+  prims: Prim[]; page: { w: number; h: number; style: string; stage?: string }; defaults: any; usesT: boolean; duration: number | null; cam: any;
   out: { line: number; text: string }[]; steps: number; depth: number; order: number; line: number; figs: number;
   /** lines of the user-function calls currently being evaluated (outermost first) */
   sites: number[];
@@ -143,7 +143,7 @@ function makeInterpreter(ctx: RunCtx, root: Env) {
 
 export function runProgram(src: string, t: number, hooks: { measure?: (s: string) => number | null; overrides?: Record<string, number> } = {}): RunCtx {
   const ctx: RunCtx = {
-    prims: [], page: { w: 210, h: 297, style: 'paper' }, defaults: { color: null, width: 0.25, size: 11 }, usesT: false, duration: null, cam: null,
+    prims: [], page: { w: 210, h: 297, style: 'paper', stage: 'studio' }, defaults: { color: null, width: 0.25, size: 11 }, usesT: false, duration: null, cam: null,
     out: [], steps: 0, depth: 0, order: 0, line: 1, figs: 0, sites: [], frames: [], hooks: [], figMeta: {}, frameSeq: 0, role: null, overrides: hooks.overrides, call: null as any, pageStyle: null as any, measure: hooks.measure,
   };
   ctx.pageStyle = () => PAGE_STYLES[ctx.page.style];
