@@ -10,7 +10,10 @@ Runs in the browser, or as a Windows / macOS / Linux desktop app (Tauri).
 - pick a **template**: blank page, lecture notes (ruled paper on a desk), chalkboard (framed on a classroom wall), 16:9 slides, blueprint, poster, graph-paper worksheet, or a floating figure. Or build a blank page in any size, paper and stage.
 - open an **example** from the library, sorted into folders: getting started, surfaces, curves and fields, physics, calculus, linear algebra.
 - type an equation to auto-model it.
+- start a **board** (chalkboard, whiteboard or slate), or reopen a recent one.
 - go back to the pages you already have open.
+
+**Boards.** Board mode lives at **latexmodeler.app/board**. It's Screenboard, which used to be a separate app: a freehand chalkboard and whiteboard for explaining things on a call, with markers, photos, PDFs, sticky notes, live sessions, recording and a library of your boards. Use **LaTeX Modeler** in its menu (or on its Home screen) to come back to pages. If you used Screenboard at its old address, open it once and press **Move my boards**: your library comes over in one step.
 
 **Formats.** A page has a size, a paper and a *stage*, the room it sits in:
 ```
@@ -227,13 +230,16 @@ src/
   examples/   example pages, one folder per topic (shown on the start screen)
   templates/  starter pages for the New page templates
   library.ts  reads templates/examples (title from the first comment line)
-  ui/         start screen (home.ts), card pictures (thumbs.ts), reference panel
+  ui/         start screen (home.ts), card pictures (thumbs.ts), recent boards (boards.ts), reference panel
+public/board/ board mode (Screenboard): one self-contained page, its service worker and manifest,
+              and its libraries in lib/ (MathJax, jsPDF, JSZip, PDF.js, PeerJS), served at /board/
 src-tauri/    desktop wrapper (Rust): dialogs, file access, .bd file association
-tests/run.ts  auto-model corpus test
+tests/run.ts  auto-model corpus, calculus, examples and templates
+tests/board-smoke.mjs  board mode in a real browser (`npm run test:board`; first time: `npx playwright install chromium`)
 .github/workflows/  CI, desktop release builds, GitHub Pages
 ```
 
-Everything runs locally: MathJax, fonts and three.js are bundled, so the desktop app works offline.
+Everything runs locally: MathJax, fonts, three.js and the board libraries are bundled, so the desktop app works offline. The only outside connection is the PeerJS matchmaking server, for live board sessions. See [SECURITY.md](SECURITY.md).
 
 ---
 

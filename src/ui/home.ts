@@ -3,6 +3,7 @@
 import { TEMPLATES, EXAMPLES, FOLDERS, SIZE_CHOICES, blankPage, type LibItem } from '../library';
 import { PAGE_STYLES, STAGES } from '../lang/pages';
 import type { Thumbs } from './thumbs';
+import { BOARD_URL, BOARD_THEMES, recentBoards, ago, boardSketch } from './boards';
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
@@ -45,6 +46,10 @@ export class Home {
         <div class="shead"><h2>New page</h2><span>pick a template — every one is plain code you can change</span></div>
         <div class="grid" id="hTpl"></div>
       </section>
+      <section id="hBoards">
+        <div class="shead"><h2>Boards</h2><span>draw freehand on a chalkboard or whiteboard, great for explaining things on a call</span><a class="vbtn" href="${BOARD_URL}?do=home">All boards</a></div>
+        <div class="grid" id="hBoardGrid"></div>
+      </section>
       <section>
         <div class="shead"><h2>Examples</h2><span>what LaTeX Modeler can do — open one, orbit it, change it</span>
           <input id="hFind" type="search" placeholder="Search examples" spellcheck="false"></div>
@@ -82,6 +87,25 @@ export class Home {
     const find = this.el.querySelector<HTMLInputElement>('#hFind')!;
     find.addEventListener('input', () => { this.query = find.value.trim().toLowerCase(); this.renderExamples(); });
     this.renderExamples();
+    this.renderBoards([]);
+  }
+
+  /** new-board cards for each surface, then the boards you worked on last */
+  private renderBoards(recent: Awaited<ReturnType<typeof recentBoards>>) {
+    const g = this.el.querySelector('#hBoardGrid'); if (!g) return;
+    g.innerHTML = '';
+    const link = (href: string, th: string, title: string, about: string, foot: string) => {
+      const a = document.createElement('a'); a.className = 'card board'; a.href = href;
+      a.innerHTML = `<div class="th">${th}</div><div class="meta"><div class="t">${esc(title)}</div><div class="d">${esc(about)}</div><div class="f">${esc(foot)}</div></div>`;
+      g.appendChild(a); return a;
+    };
+    for (const t of BOARD_THEMES) link(`${BOARD_URL}?new=${t.key}`, boardSketch(t), `New ${t.label.toLowerCase()}`, t.about, 'Board');
+    for (const b of recent) {
+      const a = link(`${BOARD_URL}?open=${encodeURIComponent(b.id)}`, '', b.name, `${b.pages} ${b.pages === 1 ? 'board' : 'boards'} · ${ago(b.updated)}`, 'Board');
+      const th = a.querySelector<HTMLElement>('.th')!;
+      if (b.thumb) { const img = document.createElement('img'); img.alt = ''; img.draggable = false; img.src = b.thumb; th.appendChild(img); }
+      else th.classList.add('blank');
+    }
   }
 
   private card(title: string, about: string, format: string, src: string, open: () => void, extra = '') {
@@ -122,6 +146,7 @@ export class Home {
 
   /** the "continue" row: pages that are already open */
   refresh() {
+    recentBoards(5).then(list => this.renderBoards(list));
     const sec = this.el.querySelector('#hOpen')!; const docs = this.host.openDocs();
     if (!docs.length) { sec.innerHTML = ''; return; }
     sec.innerHTML = `<div class="shead"><h2>Continue</h2><span>${docs.length === 1 ? 'the page you have open' : `the ${docs.length} pages you have open`}</span></div><div class="grid"></div>`;
