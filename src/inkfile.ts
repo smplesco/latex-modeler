@@ -8,7 +8,7 @@ const MAX_STROKES = 5000, MAX_POINTS = 2_000_000;
 /** the page code with its ink appended (unchanged when there is no ink) */
 export function joinInk(code: string, ink?: Stroke[] | null): string {
   if (!ink || !ink.length) return code;
-  const pts = ink.map(s => ({ tool: s.tool, color: s.color, w: s.w, pts: s.pts.map(v => (Number.isFinite(v) ? +v.toFixed(2) : null)) }));
+  const pts = ink.map(s => ({ tool: s.tool, color: s.color, w: s.w, pts: s.pts.map(v => (Number.isFinite(v) ? +v.toFixed(2) : null)), ...(s.slide ? { slide: s.slide } : {}) }));
   return code + (code === '' || code.endsWith('\n') ? '' : '\n') + INK_TAG + JSON.stringify(pts) + '\n';
 }
 
@@ -26,13 +26,14 @@ export function splitInk(text: string): { code: string; ink?: Stroke[] } {
     ink = a.filter((s: any) => s && (s.tool === 'pen' || s.tool === 'hl') && typeof s.color === 'string' && /^#[0-9a-f]{3,8}$/i.test(s.color)
       && typeof s.w === 'number' && s.w > 0 && s.w < 50 && Array.isArray(s.pts) && s.pts.length >= 3 && s.pts.length % 3 === 0
       && (n += s.pts.length) <= MAX_POINTS && s.pts.every((v: any) => v === null || (typeof v === 'number' && Math.abs(v) < 1e5)))
-      .map((s: any) => ({ tool: s.tool, color: s.color, w: s.w, pts: s.pts.map((v: any) => (v === null ? NaN : v)) }));
+      .map((s: any) => ({ tool: s.tool, color: s.color, w: s.w, pts: s.pts.map((v: any) => (v === null ? NaN : v)), ...(Number.isInteger(s.slide) && s.slide > 0 && s.slide < 1000 ? { slide: s.slide } : {}) }));
   } catch { return { code: text }; }
   return { code: text.slice(0, at), ink: ink && ink.length ? ink : undefined };
 }
 
 /** SVG polylines for the ink, in page millimetres (page height h flips y) */
-export function inkSVG(ink: Stroke[] | undefined, h: number): string {
+export function inkSVG(ink: Stroke[] | undefined, h: number, slide = 0): string {
+  ink = ink?.filter(s => (s.slide ?? 0) === slide);
   if (!ink?.length) return '';
   const f = (v: number) => +v.toFixed(2);
   return ink.map(s => {

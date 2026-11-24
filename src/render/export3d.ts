@@ -43,6 +43,48 @@ function exportable(root: THREE.Object3D, opts: { skipTextured?: boolean; unrota
   return wrap;
 }
 
+/** for AR: the same copy, but every line becomes a thin flat ribbon (USDZ and AR viewers draw meshes only) */
+export function arModel(root: THREE.Object3D, ribbonMM = 0.5): THREE.Group {
+  const wrap = exportable(root, { skipTextured: true });
+  const inner = wrap.children[0];
+  const byColor = new Map<string, number[]>();
+  const keep: THREE.Object3D[] = [];
+  for (const o of [...inner.children] as any[]) {
+    if (!(o.isLineSegments || o.isLine)) {
+      // USDZ has no per-vertex colours: a colour-mapped surface gets its average colour
+      const ca = o.isMesh && o.material.vertexColors ? o.geometry.getAttribute('color') : null;
+      if (ca) { const c = [0, 0, 0]; for (let i = 0; i < ca.count; i++) { c[0] += ca.getX(i); c[1] += ca.getY(i); c[2] += ca.getZ(i); } o.material.color.setRGB(c[0] / ca.count, c[1] / ca.count, c[2] / ca.count); o.material.vertexColors = false; }
+      if (o.isMesh) keep.push(o);
+      continue;
+    }
+    const pos = o.geometry.getAttribute('position').array as Float32Array;
+    const key = '#' + (o.material.color?.getHexString?.() ?? '333333');
+    const arr = byColor.get(key) ?? []; byColor.set(key, arr);
+    const step = o.isLineSegments ? 6 : 3;
+    for (let i = 0; i + 5 < pos.length; i += step) {
+      const a = new THREE.Vector3(pos[i], pos[i + 1], pos[i + 2]), b = new THREE.Vector3(pos[i + 3], pos[i + 4], pos[i + 5]);
+      const d = b.clone().sub(a); if (d.lengthSq() < 1e-10) continue;
+      let w = d.clone().cross(new THREE.Vector3(0, 0, 1)); if (w.lengthSq() < 1e-8) w = new THREE.Vector3(1, 0, 0); w.normalize().multiplyScalar(ribbonMM / 2);
+      const lift = new THREE.Vector3(0, 0, 0.05);
+      const p = [a.clone().add(w).add(lift), a.clone().sub(w).add(lift), b.clone().add(w).add(lift), b.clone().sub(w).add(lift)];
+      arr.push(...p[0].toArray(), ...p[1].toArray(), ...p[2].toArray(), ...p[2].toArray(), ...p[1].toArray(), ...p[3].toArray());
+    }
+    if (arr.length > 3_000_000) break;
+  }
+  inner.clear(); for (const o of keep) inner.add(o);
+  for (const [c, arr] of byColor) {
+    if (!arr.length) continue;
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(arr, 3)); g.computeVertexNormals();
+    inner.add(new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: c, side: THREE.DoubleSide, roughness: 0.8, metalness: 0 })));
+  }
+  return wrap;
+}
+export async function toUSDZ(root: THREE.Object3D): Promise<Uint8Array> {
+  const { USDZExporter } = await import('three/addons/exporters/USDZExporter.js');
+  const scene = new THREE.Scene(); scene.add(arModel(root));
+  return await new USDZExporter().parse(scene) as Uint8Array;
+}
+
 const mat4 = (m: number[][]) => new THREE.Matrix4().set(m[0][0], m[0][1], m[0][2], 0, m[1][0], m[1][1], m[1][2], 0, m[2][0], m[2][1], m[2][2], 0, 0, 0, 0, 1);
 export async function toGLB(root: THREE.Object3D, opts: { skipTextured?: boolean; unrotate?: number[][] } = {}): Promise<Uint8Array> {
   const { GLTFExporter } = await import('three/addons/exporters/GLTFExporter.js');

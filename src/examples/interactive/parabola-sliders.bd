@@ -1,0 +1,36 @@
+// Parabola sliders — drag a, b and c to reshape y = ax² + bx + c and watch the roots, vertex and discriminant follow.
+page("A5 landscape", "paper")
+
+a = slider("a", 1, -2, 2, {step: 0.05})
+b = slider("b", -1, -4, 4, {step: 0.05})
+c = slider("c", -2, -4, 4, {step: 0.05})
+showRoots = toggle("roots", 1, {label: "show the roots"})
+showVertex = toggle("vertex", 1, {label: "show the vertex"})
+
+tex("\textbf{The quadratic } y = ax^2 + bx + c", (16, 138), {size: 15, anchor: "w"})
+tex("a = " + fmt(a, 2) + ",\quad b = " + fmt(b, 2) + ",\quad c = " + fmt(c, 2), (16, 129), {size: 10, anchor: "w", color: "#555"})
+
+F = frame2d((16, 16), (130, 104), (-5, 5), (-6, 6), {xlabel: "x", ylabel: "y"})
+f(x) = a * x^2 + b * x + c
+fplot(F, f, {color: "#2b6cb0", width: 0.55})
+
+D = b^2 - 4 * a * c
+tex("\Delta = b^2 - 4ac = " + fmt(D, 2), (152, 112), {size: 10, anchor: "w"})
+if abs(a) > 0.001 {
+  xv = -b / (2 * a)
+  if showVertex {
+    dot(F.map((xv, f(xv))), {r: 1.1, color: "#d64545"})
+    tex("\text{vertex } (" + fmt(xv, 2) + ",\ " + fmt(f(xv), 2) + ")", (152, 102), {size: 9.5, anchor: "w", color: "#d64545"})
+  }
+  if showRoots && D >= 0 {
+    r1 = (-b - sqrt(D)) / (2 * a)
+    r2 = (-b + sqrt(D)) / (2 * a)
+    dot(F.map((r1, 0)), {r: 1, color: "#2e9e6a"})
+    dot(F.map((r2, 0)), {r: 1, color: "#2e9e6a"})
+    tex("x = " + fmt(r1, 2) + ",\ " + fmt(r2, 2), (152, 92), {size: 9.5, anchor: "w", color: "#2e9e6a"})
+  }
+  if showRoots && D < 0 {
+    tex("\text{no real roots}", (152, 92), {size: 9.5, anchor: "w", color: "#888"})
+  }
+}
+text("Drag the sliders in the corner. Double-click a name to put it back.", (152, 20), {size: 8, anchor: "w", color: "#888"})

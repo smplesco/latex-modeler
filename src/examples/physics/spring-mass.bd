@@ -1,0 +1,32 @@
+// Spring and mass — a block on a spring, solved with ode(); change the stiffness, the mass and the friction.
+page("A5 landscape", "paper")
+duration(10)
+
+k = slider("k", 20, 2, 60, {label: "k\ (\mathrm{N/m})", step: 0.5})
+mass = slider("m", 1, 0.2, 4, {label: "m\ (\mathrm{kg})", step: 0.05})
+c = slider("c", 0.4, 0, 6, {label: "c\ (\mathrm{kg/s})", step: 0.05})
+x0 = 0.6
+
+tex("\textbf{Mass on a spring}", (14, 138), {size: 15, anchor: "w"})
+tex("m\ddot x + c\dot x + kx = 0", (14, 128), {size: 10.5, anchor: "w", color: "#444"})
+w0 = sqrt(k / mass)
+zeta = c / (2 * sqrt(k * mass))
+tex("\omega_0 = " + fmt(w0, 2) + "\,\mathrm{rad/s}, \quad \zeta = " + fmt(zeta, 2), (14, 119), {size: 9.5, anchor: "w", color: "#666"})
+
+f(s, y) = (y.y, (-k * y.x - c * y.y) / mass)
+s = odeat(f, (x0, 0), t, {dt: 0.005})
+
+// the wall, the floor, the spring and the block
+rect((14, 70), (4, 34), {fill: "#cfd5dc"})
+line((18, 70), (190, 70), {width: 0.4})
+X = 96 + 60 * s.x
+spring((18, 84), (X - 12, 84), {coils: 11, r: 3, width: 0.35})
+rect((X - 12, 70), (24, 28), {fill: "#2b6cb0", stroke: "#1d4f86"})
+tex("m", (X, 84), {size: 11, color: "#fff"})
+arrow((96, 62), (X, 62), {color: "#d64545", width: 0.35})
+tex("x = " + fmt(s.x, 3) + "\,\mathrm{m}", (96, 56), {size: 9, color: "#d64545"})
+
+A = frame2d((20, 12), (170, 34), (0, 10), (-0.7, 0.7), {xlabel: "t", ylabel: "x"})
+ys = ode(f, (x0, 0), 10, {n: 800})
+line(map(ys, (y, i) => A.map((i * 10 / 800, y.x))), {color: "#2b6cb0", width: 0.35})
+dot(A.map((t, s.x)), {r: 0.9, color: "#d64545"})

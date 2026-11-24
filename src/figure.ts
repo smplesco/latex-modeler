@@ -149,6 +149,13 @@ const api = {
     const r = m.autoModel(tex);
     return r.ok ? { ok: true, src: r.code!, title: r.title!, detected: r.detected! } : { ok: false, error: r.error || "That equation couldn't be modelled." };
   },
+  /** handwritten strokes (each a list of [x, y], y pointing down) → LaTeX */
+  async handwriting(strokes: [number, number][][]): Promise<string> {
+    if (!Array.isArray(strokes) || strokes.length > 400) return '';
+    const clean = strokes.filter(Array.isArray).map(s => s.slice(0, 4000).filter(p => Array.isArray(p) && isFinite(p[0]) && isFinite(p[1])).map(p => [+p[0], +p[1]] as [number, number])).filter(s => s.length);
+    const { toLatex } = await import('./hand/recognize');
+    return toLatex(clean);
+  },
   library: () => [...TEMPLATES, ...EXAMPLES].map(e => ({ key: e.key, kind: e.kind, folder: e.folder, title: e.title, about: e.about, format: e.format, src: e.src })),
   openPages,
   /** the address that opens this page as a new document in LaTeX Modeler */

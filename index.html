@@ -30,10 +30,14 @@
         <div class="menu" id="exportMenu">
           <div data-x="svg">Page as SVG <small>vector, for print</small></div>
           <div data-x="png">Page as PNG <small>200 dpi</small></div>
+          <div data-x="pdf">PDF <small>vector; every slide of a deck</small></div>
+          <div data-x="tikz">TikZ code <small>for a LaTeX document</small></div>
           <div data-x="share">Share link <small>the page inside a link — nothing uploaded</small></div>
           <div data-x="html">Interactive HTML (3D) <small>one file, opens in any browser</small></div>
+          <div data-x="live">Present live <small>others follow along in their browser</small></div>
           <div data-x="view">Current view as PNG <small>what you see</small></div>
           <div data-x="glb">3D model (GLB) <small>Blender, PowerPoint, 3D viewers</small></div>
+          <div data-x="usdz">3D model for AR (USDZ) <small>iPhone and iPad Quick Look</small></div>
           <div data-x="video">Video or GIF… <small>turntable or the page's animation</small></div>
           <div data-x="code">Copy page code</div>
         </div>
@@ -53,6 +57,7 @@
         <div class="mlabel" title="Type any LaTeX equation and LaTeX Modeler builds a page that models it">∑ Auto-model</div>
         <input id="mIn" spellcheck="false" autocomplete="off" placeholder="type LaTeX, e.g.  z = \sin\sqrt{x^2+y^2}   then Enter">
         <select id="mEx" title="Example equations"><option value="">Examples…</option></select>
+        <button class="vbtn" id="mWrite" title="Write the equation by hand instead">✎ Write</button>
         <button class="vbtn primary" id="mGo" title="Generate a page for this equation (Enter)">Model it</button>
       </div>
       <div id="mprev"><span class="eq" id="mEq"></span><span class="kind" id="mKind"></span></div>
@@ -60,10 +65,14 @@
         <button id="play" title="Play / pause (Space)"><svg id="playIc" viewBox="0 0 12 12"><path d="M2 1l9 5-9 5z"/></svg></button>
         <input type="range" id="slider" min="0" max="6" step="0.01" value="0" aria-label="time">
         <span id="tval">t = 0.00</span>
+        <span id="slNav" title="Slides (PgUp / PgDn)" style="display:none"><button class="vbtn" id="slPrev" aria-label="Previous slide">‹</button><span id="slNum">1 / 1</span><button class="vbtn" id="slNext" aria-label="Next slide">›</button></span>
+        <button class="vbtn live" id="liveChip" title="You are presenting live: see the link and who is watching" style="display:none">● Live</button>
+        <button class="vbtn primary" id="bPresent" title="Present full screen, with a presenter window for your notes (F5)" style="display:none">▶ Present</button>
         <button class="vbtn" id="bLook" title="Page size, paper and the stage it sits on">Page ▾</button>
         <button class="vbtn" id="bInk" title="Draw on the page: pen, highlighter, laser pointer, and live recording (I)">✎ Ink</button>
         <button class="vbtn on" id="bCam" title="Camera follows the timeline (script view() or a turntable tour)">Camera</button>
         <button class="vbtn on" id="bOrtho" title="Orthographic / perspective (O)">Ortho</button>
+        <button class="vbtn" id="bAR" title="See this page on a real table, in augmented reality" style="display:none">AR</button>
         <button class="vbtn" id="bReset" title="Back to the page view (F)">Reset</button>
       </div>
       <div id="gl">
@@ -71,6 +80,7 @@
         <div id="hint">drag to orbit · right-drag to pan · scroll to zoom<br>click any element to jump to its code (Alt+click: inside the helper)</div>
         <div id="pickTip"></div>
         <div id="lookPop"></div>
+        <div id="watchBar"><span class="dot"></span><span id="watchMsg">Connecting to the presenter…</span><button class="vbtn on" id="wFollow" title="Follow the presenter's slides, camera and sliders">Follow</button><button class="vbtn" id="wCopy" title="Keep this page as your own copy">Save a copy</button><button class="vbtn" id="wLeave">Leave</button></div>
         <div id="inkBar" role="toolbar" aria-label="Ink">
           <button class="ik on" data-tool="pen" title="Pen (P)">Pen</button>
           <span class="sw" data-c="#e5484d" title="Red"></span><span class="sw" data-c="#2b6cb0" title="Blue"></span><span class="sw" data-c="#2e9e6a" title="Green"></span><span class="sw" data-c="ink" title="Black or white, to match the page"></span>

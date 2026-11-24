@@ -4,7 +4,7 @@ import { PAGE_STYLES, pageRules } from '../lang/pages';
 import type { RunCtx } from '../lang/interp';
 import { dynVisible } from './dyn';
 
-function col(c: string): [string, number] {
+export function col(c: string): [string, number] {
   const s = String(c).trim();
   const m = /^rgba\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*([\d.]+)\s*\)$/i.exec(s);
   if (m) return ['#' + [m[1], m[2], m[3]].map(v => (+v).toString(16).padStart(2, '0')).join(''), +m[4]];
@@ -14,7 +14,7 @@ function col(c: string): [string, number] {
   try { const cv = document.createElement('canvas').getContext('2d')!; cv.fillStyle = s; const r = cv.fillStyle as string; if (r.startsWith('#')) return [r, 1]; const mm = /rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?/.exec(r); if (mm) return ['#' + [mm[1], mm[2], mm[3]].map(v => (+v).toString(16).padStart(2, '0')).join(''), mm[4] ? +mm[4] : 1]; } catch { /* node */ }
   return ['#000000', 1];
 }
-const f = (v: number) => +v.toFixed(3);
+export const f = (v: number) => +v.toFixed(3);
 const hex = (r: number, g: number, b: number) => '#' + [r, g, b].map(v => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, '0')).join('');
 
 /** the page as SVG; `extra` is drawn on top of everything (the page's ink) */

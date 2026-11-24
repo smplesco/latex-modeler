@@ -1,0 +1,6 @@
+\begin{tikzpicture}
+\begin{axis}[axis equal, domain=0:360, samples=200]
+  \addplot[purple, thick] ({cos(3*x)}, {sin(2*x)});
+  \addplot[gray, domain=-1:1] {0.5*x};
+\end{axis}
+\end{tikzpicture}

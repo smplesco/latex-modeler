@@ -6,6 +6,8 @@ import { compile, tryDiff, freeSyms } from '../src/model/sym';
 import { runProgram } from '../src/lang/interp';
 import { readFileSync, readdirSync } from 'node:fs';
 import { joinInk, splitInk } from '../src/inkfile';
+import { importTikZ } from '../src/import/tikz';
+import { runHandTests } from './hand';
 
 const EXTRA = [
   'y = x^2', 'y = \\tan x', 'y = \\ln x', 'y = \\sqrt{x}', 'y = e^x', 'y = \\frac{1}{x}', 'y = |x - 1| + |x + 1|', 'y = \\lfloor x \\rfloor',
@@ -100,6 +102,46 @@ for (const f of [...walk('src/examples'), ...walk('src/templates')]) {
   }
   catch (e: any) { fail++; console.log(`✗ example ${f}: line ${e.line}: ${e.message}`); }
 }
+// sliders, slides and the simulation helpers
+{
+  const check = (name: string, ok: boolean) => { n++; if (!ok) { fail++; console.log('✗ lang      ' + name); } else console.log('✓ lang      ' + name); };
+  const M = { measure: () => 10 };
+  const sl = 'a = slider("a", 2, 0, 5)\nb = toggle("b", 1)\ndot((a, b))';
+  check('slider default', runProgram(sl, 0, M).prims[0].p[0] === 2);
+  check('slider value from the reader', runProgram(sl, 0, { ...M, sliders: { a: 4.5, b: 0 } }).prims[0].p.slice(0, 2).join() === '4.5,0');
+  check('slider value is clamped', runProgram(sl, 0, { ...M, sliders: { a: 99 } }).prims[0].p[0] === 5);
+  check('controls are listed', runProgram(sl, 0, M).controls.map(c => c.kind).join() === 'slider,toggle');
+  let threw = false; try { runProgram('a = slider("a", 1, 2, 1)', 0, M); } catch { threw = true; } check('slider with max < min is an error', threw);
+  const deck = readFileSync('src/templates/deck.bd', 'utf8');
+  const counts = [0, 1, 2, 3].map(k => runProgram(deck, 1, { ...M, slide: k }));
+  check('deck has 4 slides with titles', counts[0].slides.map(s => s.title).join('|') === 'Title|The idea|A picture|Thank you');
+  check('each slide draws its own marks', new Set(counts.map(c => c.prims.filter(p => p.kind === 'tex').map(p => p.src).join('|'))).size === 4);
+  check('the shared footer is on every slide', counts.every(c => c.prims.some(p => p.kind === 'tex' && /Your talk/.test(p.src))));
+  check('only the shown slide sets the camera', !counts[0].cam && !!counts[2].cam);
+  check('notes are kept', /Orbit/.test(counts[0].slides[2].notes));
+  check('figures on other slides are hidden from the explorer', counts[0].frames.length === 0 && counts[2].frames.length === 1);
+  check('a slide past the end shows the last one', runProgram(deck, 0, { ...M, slide: 99 }).prims.some(p => p.kind === 'tex' && /Thank/.test(p.src)));
+  const decay = runProgram('ys = ode((s, y) => -y, 1, 1, {n: 50})\ndot((ys[50], 0))', 0, M).prims[0].p[0];
+  check('ode: exponential decay is accurate', Math.abs(decay - Math.exp(-1)) < 1e-6);
+  const osc = runProgram('s = odeat((u, y) => (y.y, -y.x), (1, 0), pi)\ndot((s.x, s.y))', 0, M).prims[0].p;
+  check('odeat: half a period of an oscillator', Math.abs(osc[0] + 1) < 1e-4 && Math.abs(osc[1]) < 1e-4);
+  const r = runProgram('dot((rand(3), rand(3)))\ndot((rand(4), rand(3, 7)))', 0, M).prims;
+  check('rand is repeatable and in [0, 1)', r[0].p[0] === r[0].p[1] && r[0].p[0] !== r[1].p[0] && r.every((p: any) => p.p[0] >= 0 && p.p[0] < 1));
+  check('spring draws a zig-zag', runProgram('spring((0, 0), (40, 0), {coils: 5})', 0, M).prims[0].pts.length === 14);   // ends, two lead-ins and 2 × 5 zig-zag corners
+}
+// TikZ / pgfplots import: every sample converts and the page it makes runs
+for (const f of readdirSync('tests/tikz').filter(f => f.endsWith('.tex'))) {
+  n++;
+  try {
+    const r = importTikZ(readFileSync('tests/tikz/' + f, 'utf8'));
+    const marks = runProgram(r.code, 0, { measure: () => 10 }).prims.length;
+    if (marks < 3) throw new Error('only ' + marks + ' marks');
+    if (/\\\\[a-zA-Z]/.test(r.code)) throw new Error('a doubled backslash in the code: .bd strings are raw');
+    console.log(`✓ tikz      ${String(marks).padStart(5)} marks  ${f}${r.warnings.length ? '  (notes: ' + r.warnings.join('; ') + ')' : ''}`);
+  } catch (e: any) { fail++; console.log(`✗ tikz ${f}: ${e.line ? 'line ' + e.line + ': ' : ''}${e.message}`); }
+}
+// handwriting → LaTeX
+runHandTests((name, ok, info) => { n++; if (!ok) { fail++; console.log(`✗ hand      ${name}: ${info}`); } else console.log(`✓ hand      ${name}  (${info})`); });
 // ink rides along as a trailing comment line: the page still runs, and it comes back exactly
 {
   const check = (name: string, ok: boolean) => { n++; if (!ok) { fail++; console.log('✗ ink       ' + name); } else console.log('✓ ink       ' + name); };

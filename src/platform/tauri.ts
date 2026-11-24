@@ -12,7 +12,7 @@ export function tauriPlatform(): Platform {
   return {
     kind: 'desktop',
     async openFile(): Promise<OpenedFile | null> {
-      const p = await open({ multiple: false, directory: false, filters: [...BD, { name: 'All files', extensions: ['*'] }] });
+      const p = await open({ multiple: false, directory: false, filters: [...BD, { name: 'TikZ or pgfplots (import)', extensions: ['tex', 'tikz'] }, { name: 'All files', extensions: ['*'] }] });
       if (!p || Array.isArray(p)) return null;
       return { name: base(p), path: p, text: await readTextFile(p) };
     },

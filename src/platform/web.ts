@@ -4,7 +4,7 @@ import type { Platform, OpenedFile } from './index';
 function pick(): Promise<File | null> {
   return new Promise(resolve => {
     const inp = document.createElement('input');
-    inp.type = 'file'; inp.accept = '.bd,.txt';
+    inp.type = 'file'; inp.accept = '.bd,.txt,.tex,.tikz';
     inp.onchange = () => resolve(inp.files?.[0] ?? null);
     inp.click();
   });
@@ -21,7 +21,7 @@ export function webPlatform(): Platform {
     kind: 'web',
     async openFile(): Promise<OpenedFile | null> {
       const f = await pick(); if (!f) return null;
-      return { name: f.name.endsWith('.bd') ? f.name : f.name + '.bd', text: await f.text() };
+      return { name: /\.(bd|tex|tikz)$/i.test(f.name) ? f.name : f.name + '.bd', text: await f.text() };
     },
     async saveFile(name, text) { download(name, new Blob([text], { type: 'text/plain' })); return { name }; },
     async exportFile(defaultName, data, mime) { download(defaultName, new Blob([data as BlobPart], { type: mime })); return true; },

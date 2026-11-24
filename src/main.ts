@@ -14,6 +14,10 @@ import { PAGES, PAGE_STYLES, STAGES } from './lang/pages';
 import { Home } from './ui/home';
 import { Thumbs } from './ui/thumbs';
 import { Ink, type Stroke } from './render/ink';
+import { ControlPanel } from './ui/controls';
+import { Presenter } from './ui/present';
+import { openWritePad } from './ui/writepad';
+import { LiveHost, LiveViewer, parseWatch, type LiveState } from './live';
 import { registerOffline } from './offline';
 registerOffline();
 import type { ModelResult } from './model/generate';
@@ -30,9 +34,12 @@ const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replac
 
 // ------------------------------------------------------------------ documents
 // example docs remember which library page they came from (src), so they can be reverted and stay clean until edited
-interface Doc { id: string; name: string; text: string; saved: string; path?: string; example?: boolean; src?: string; ink?: Stroke[]; inkSaved?: string }
+interface Doc { id: string; name: string; text: string; saved: string; path?: string; example?: boolean; src?: string; ink?: Stroke[]; inkSaved?: string; /** a page someone is presenting live to us (not kept between visits) */ live?: boolean; /** slider and toggle values the reader set */ vals?: Record<string, number>; /** the slide being shown */ slide?: number }
 const STORE = 'lm.session.v3', OLD_STORE = 'bdraw.session.v2';
-let docs: Doc[] = [], current = '';          // current = '' → the start screen
+let docs: Doc[] = [], current = '';          // current = '' → the start screen (or a board tab, when boardCur is set)
+/** boards open as tabs next to pages: each runs board mode in its own frame, which keeps its state while you switch */
+interface BoardTab { key: string; url: string; id?: string; name: string; frame?: HTMLIFrameElement }
+const boardTabs: BoardTab[] = []; let boardCur = '';
 const original = (d: Doc) => (d.example ? byKey(d.src)?.src : undefined);
 function loadSession() {
   let saved: Doc[] = [], migrating = false;
@@ -40,6 +47,8 @@ function loadSession() {
     let raw = localStorage.getItem(STORE);
     if (raw === null) { raw = localStorage.getItem(OLD_STORE); migrating = raw !== null; }
     const s = JSON.parse(raw || 'null'); if (s && Array.isArray(s.docs)) saved = s.docs;
+    // board tabs come back too (they load only when you click them)
+    if (s && Array.isArray(s.boards)) for (const b of s.boards.slice(0, 20)) if (b && /^[a-z0-9]{6,40}$/.test(String(b.id)) && typeof b.name === 'string') boardTabs.push({ key: 'b' + b.id, url: './board/?open=' + b.id + '&embed=1', id: b.id, name: b.name.slice(0, 80) });
   } catch { /* ignore */ }
   for (const d of saved) {
     if (!d || typeof d.text !== 'string' || typeof d.name !== 'string') continue;
@@ -56,7 +65,7 @@ function loadSession() {
   if (migrating) { try { localStorage.removeItem(OLD_STORE); } catch { /* ignore */ } persist(); }
 }
 let saveTimer = 0;
-function persist() { clearTimeout(saveTimer); saveTimer = window.setTimeout(() => { try { localStorage.setItem(STORE, JSON.stringify({ docs, current })); } catch { /* ignore */ } }, 300); }
+function persist() { clearTimeout(saveTimer); saveTimer = window.setTimeout(() => { try { localStorage.setItem(STORE, JSON.stringify({ docs: docs.filter(d => !d.live), current: doc()?.live ? '' : current, boards: boardTabs.filter(b => b.id).map(b => ({ id: b.id, name: b.name })) })); } catch { /* ignore */ } }, 300); }
 const doc = (): Doc | undefined => docs.find(d => d.id === current);
 const inkKey = (d: Doc) => (d.ink?.length ? JSON.stringify(d.ink) : '');
 const isDirty = (d: Doc) => (d.example ? d.text !== original(d) || !!d.ink?.length : d.text !== d.saved || inkKey(d) !== (d.inkSaved ?? ''));
@@ -72,6 +81,7 @@ let platform: Platform;
 const editor = new Editor($('editor'));
 const viewer = new Viewer($('gl'));
 const ink = new Ink(viewer);
+const controls = new ControlPanel($('gl'));
 // ---- Figure Explorer: open any figure as a live 3D / 2D graph
 // the Figure Explorer is loaded the first time someone opens a figure (keeps start-up light)
 let explorer: Explorer | null = null, explorerLoad: Promise<Explorer> | null = null;
@@ -80,6 +90,7 @@ const getExplorer = () => (explorerLoad ??= import('./explore/explorer').then(m 
   time: () => tCur,
   measure: measureTex,
   title: () => doc()?.name ?? 'page.bd',
+  hooks: () => ({ sliders: doc()?.vals, slide: doc()?.slide ?? 0 }),
   writeBack: (name, value, line) => {
     const lines = editor.value.split('\n'); const L = lines[line - 1] ?? '';
     const m = new RegExp('^(\\s*' + name + '\\s*=\\s*)(-?[0-9.eE+]+)').exec(L);
@@ -98,7 +109,7 @@ const chips = new FigureChips($('gl'), viewer, openExplore);
 function updateTabs() {
   const tabs = $('tabs'); tabs.innerHTML = '';
   const home = document.createElement('div');
-  home.className = 'tab home' + (current ? '' : ' act'); home.title = 'Start screen: templates and examples';
+  home.className = 'tab home' + (current || boardCur ? '' : ' act'); home.title = 'Start screen: templates and examples';
   home.innerHTML = '<svg viewBox="0 0 16 16"><path d="M2 7.5 8 2.5l6 5M3.8 6.2V13.5h3V10h2.4v3.5h3V6.2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg><span>Home</span>';
   home.onclick = () => showHome();
   tabs.appendChild(home);
@@ -111,8 +122,18 @@ function updateTabs() {
     el.onauxclick = (e) => { if (e.button === 1) { e.preventDefault(); closeDoc(d); } };   // middle-click closes, like a browser
     tabs.appendChild(el);
   }
+  for (const b of boardTabs) {
+    const el = document.createElement('div');
+    el.className = 'tab board' + (b.key === boardCur ? ' act' : '');
+    el.title = 'Board';
+    el.innerHTML = `<span class="ic">▦</span><span>${esc(b.name)}</span><span class="x" title="Close"><span>×</span></span>`;
+    el.onclick = (e) => { if ((e.target as HTMLElement).closest('.x')) { closeBoard(b); return; } showBoard(b.key); };
+    el.onauxclick = (e) => { if (e.button === 1) { e.preventDefault(); closeBoard(b); } };
+    tabs.appendChild(el);
+  }
   tabs.querySelector('.act')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   const d = doc();
+  if (boardCur) { const b = boardTabs.find(x => x.key === boardCur); platform?.setTitle(`${b?.name ?? 'Board'} — LaTeX Modeler`); $('app').classList.add('at-home'); return; }
   $('app').classList.toggle('at-home', !d);
   if (!d) { platform?.setTitle('LaTeX Modeler'); return; }
   const folder = d.example && d.src ? d.src.split('/').slice(1, -1).join(' › ') : '';
@@ -126,25 +147,84 @@ function setHash(h: string) { try { history.replaceState(null, '', h ? '#' + h :
 function openDoc(id: string) {
   const d = docs.find(x => x.id === id); if (!d) { showHome(); return; }
   const leaving = !current; current = id;
-  home?.el.classList.remove('show');
+  home?.el.classList.remove('show'); leaveBoard();
   updateTabs(); persist();
   editor.value = d.text;
   ink.set(d.ink);
   setHash(slug(d.name));
   if (leaving) { viewer.resize(); editor.refresh(); }
   tCur = 0; firstFit = true; compile(true);
+  live?.doc(); live?.state();
 }
 function showHome() {
   if (playing) setPlaying(false);
   if (rec) stopRec();
   setInk(false);
-  current = ''; setHash('');
+  current = ''; setHash(''); leaveBoard();
   lookPop.classList.remove('show'); $('bLook').classList.remove('on');
   if (explorer?.isOpen) explorer.close();
   updateTabs(); persist();
   home.refresh(); home.el.classList.add('show'); home.el.scrollTop = 0;
   status('ready'); problems = []; renderPanel();
 }
+// ---- board tabs
+const boardHost = document.createElement('div'); boardHost.id = 'boardHost'; $('app').appendChild(boardHost);
+function leaveBoard() { boardCur = ''; boardHost.classList.remove('show'); }
+/** open board mode in a tab: query is "?new=chalkboard", "?open=<id>" or "?do=home" */
+function openBoard(query: string, name = 'Board') {
+  const id = /[?&]open=([a-z0-9]{6,40})/.exec(query)?.[1];
+  const have = id && boardTabs.find(b => b.id === id);
+  if (have) { showBoard(have.key); return; }
+  const key = 'b' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+  boardTabs.push({ key, url: './board/' + query + (query.includes('?') ? '&' : '?') + 'embed=1', id, name });
+  showBoard(key);
+}
+function showBoard(key: string) {
+  const b = boardTabs.find(x => x.key === key); if (!b) return;
+  if (playing) setPlaying(false);
+  if (rec) stopRec();
+  setInk(false);
+  if (explorer?.isOpen) explorer.close();
+  current = ''; setHash(''); boardCur = key;
+  home.el.classList.remove('show');
+  if (!b.frame) {
+    const f = document.createElement('iframe'); f.title = b.name; f.src = b.url;
+    f.allow = 'clipboard-read; clipboard-write; microphone; display-capture; fullscreen';
+    boardHost.appendChild(f); b.frame = f;
+  }
+  for (const x of boardTabs) x.frame?.classList.toggle('act', x === b);
+  boardHost.classList.add('show');
+  updateTabs(); persist();
+  status('board'); problems = []; renderPanel();
+  setTimeout(() => b.frame?.contentWindow?.focus(), 50);
+}
+/** close a board tab: the board saves to your library first */
+async function closeBoard(b: BoardTab) {
+  if (b.frame?.contentWindow) {
+    const nonce = Math.random().toString(36).slice(2);
+    const done = new Promise<void>(res => {
+      const t = setTimeout(() => { removeEventListener('message', on); res(); }, 4000);
+      const on = (e: MessageEvent) => { if (e.source === b.frame?.contentWindow && e.data?.type === 'lm-board' && e.data.ev === 'saved' && e.data.nonce === nonce) { clearTimeout(t); removeEventListener('message', on); res(); } };
+      addEventListener('message', on);
+    });
+    b.frame.contentWindow.postMessage({ type: 'lm-board-save', nonce }, location.origin);
+    await done;
+  }
+  b.frame?.remove();
+  const i = boardTabs.indexOf(b); if (i >= 0) boardTabs.splice(i, 1);
+  if (boardCur === b.key) showHome(); else { updateTabs(); persist(); }
+}
+// what a board tells its tab: its id once saved, and its name
+addEventListener('message', e => {
+  if (e.origin !== location.origin || e.data?.type !== 'lm-board') return;
+  const b = boardTabs.find(x => x.frame && x.frame.contentWindow === e.source); if (!b) return;
+  if (e.data.ev === 'state') {
+    const id = typeof e.data.id === 'string' && /^[a-z0-9]{6,40}$/.test(e.data.id) ? e.data.id : b.id;
+    const name = typeof e.data.name === 'string' && e.data.name.trim() ? e.data.name.trim().slice(0, 80) : b.name;
+    if (id !== b.id || name !== b.name) { b.id = id; b.name = name; if (b.frame) b.frame.title = name; updateTabs(); persist(); }
+  } else if (e.data.ev === 'home') showHome();
+});
+
 function addDoc(name: string, text: string, path?: string, saved = text, extra: Partial<Doc> = {}) {
   let n = name, k = 2; while (docs.some(d => d.name === n && d.path === path)) n = name.replace(/(-\d+)?(\.bd)?$/, `-${k++}.bd`);
   const d: Doc = { id: 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: n, text, saved, path, ...extra };
@@ -196,6 +276,9 @@ const home = new Home($('app'), {
   openExample,
   model: tex => { mIn.value = tex; modelIt(); },
   openFile: () => $('bOpen').click(),
+  importTikz: () => importTikzDialog(),
+  openBoard: (q: string, name?: string) => openBoard(q, name),
+  write: () => openWritePad({ action: 'Model it', onUse: tex => { mIn.value = tex; modelIt(); } }),
   quickEquations: ['ripple', 'heart', 'torus', 'helix', 'rotation field', 'logistic ODE', 'Gaussian integral', 'limit: sin x / x', 'Basel series'].map(l => MODEL_EXAMPLES.find(e => e.label === l)!).filter(Boolean),
 });
 home.el.classList.add('show');
@@ -236,13 +319,15 @@ function status(msg: string, bad = false) { lastStatus = msg; $('sMsg').textCont
 function flashStatus(msg: string) { $('sMsg').textContent = msg; clearTimeout(statusT); statusT = window.setTimeout(() => ($('sMsg').textContent = lastStatus), 2200); }
 
 // ------------------------------------------------------------------ compile + timeline
+/** what the page is run with besides time: the reader's slider values and the slide being shown */
+const runHooks = () => { const d = doc(); return { measure: measureTex, sliders: d?.vals, slide: d?.slide ?? 0 }; };
 let tCur = 0, duration = 6, playing = false, usesT = false, lastCtx: RunCtx | null = null, firstFit = true, followCam = true;
 const slider = $<HTMLInputElement>('slider');
 function compile(force: boolean) {
   if (!current) return false;
   const t0 = performance.now();
   let ctx: RunCtx;
-  try { ctx = runProgram(editor.value, tCur, { measure: measureTex }); }
+  try { ctx = runProgram(editor.value, tCur, runHooks()); }
   catch (e: any) {
     const line = e.line || 0;
     problems = [{ sev: 'e', line, msg: e.message }, ...modelWarnings.map(m => ({ sev: 'w' as const, line: 0, msg: m }))];
@@ -253,7 +338,11 @@ function compile(force: boolean) {
   editor.setError(0);
   const warnings: { line: number; msg: string }[] = [];
   viewer.build(ctx, warnings);
-  ink.redraw();   // the paper's depth can change with the page
+  const d = doc()!;
+  if (ctx.slides.length) { d.slide = Math.min(d.slide ?? 0, ctx.slides.length - 1); ink.slide = d.slide; } else ink.slide = undefined;
+  ink.redraw();
+  controls.update(ctx.controls);
+  updateSlides(ctx);   // the paper's depth can change with the page
   chips.update(ctx);
   if (!playing && !recordingNow) viewer.highlight(editorRecs());
   problems = [...warnings.map(w => ({ sev: 'w' as const, ...w })), ...modelWarnings.map(m => ({ sev: 'w' as const, line: 0, msg: m }))];
@@ -271,6 +360,7 @@ function compile(force: boolean) {
 }
 function tour() {
   if (lastCtx?.cam) return lastCtx.cam;
+  if (lastCtx?.slides.length) return { yaw: 0, pitch: 0, zoom: 1 };   // a deck's slides face the audience unless they set view()
   const ph = duration > 0 ? tCur / duration : 0;
   return { yaw: 0.85 * Math.sin(2 * Math.PI * ph), pitch: 0.5 * Math.sin(Math.PI * ph), zoom: 1 + 0.3 * Math.sin(Math.PI * ph) };
 }
@@ -330,7 +420,10 @@ let edLine = 0;
 const editorRecs = () => (document.activeElement === editor.ta && edLine ? viewer.picks.filter(p => p.line === edLine || p.inner === edLine) : []);
 editor.onCursor = (l, c) => {
   $('sPos').textContent = `Ln ${l}, Col ${c}`;
-  if (l !== edLine) { edLine = l; if (!hoverRec) viewer.highlight(editorRecs()); }
+  if (l !== edLine) {
+    edLine = l; if (!hoverRec) viewer.highlight(editorRecs());
+    if (slideList.length && document.activeElement === editor.ta && slideList[0].line <= l) setSlide(slideAtLine(l), true);
+  }
 };
 editor.ta.addEventListener('blur', () => { if (!hoverRec) viewer.highlight([]); });
 editor.ta.addEventListener('focus', () => { if (!hoverRec) viewer.highlight(editorRecs()); });
@@ -339,6 +432,7 @@ editor.ta.addEventListener('focus', () => { if (!hoverRec) viewer.highlight(edit
 let compileTimer = 0;
 editor.onChange = () => {
   const d = doc(); if (!d) return; d.text = editor.value; persist(); updateTabs();
+  clearTimeout(liveDocT); liveDocT = window.setTimeout(() => live?.doc(), 400);
   clearTimeout(compileTimer); compileTimer = window.setTimeout(() => compile(false), 260);
 };
 editor.onRun = () => compile(true);
@@ -441,7 +535,9 @@ async function modelIt() {
 // ------------------------------------------------------------------ files & export
 $('bNew').onclick = () => { showHome(); requestAnimationFrame(() => home.scrollToTemplates()); };
 $('bOpen').onclick = async () => {
-  try { const f = await platform.openFile(); if (!f) return; const ex = docs.find(d => d.path && d.path === f.path); if (ex) { openDoc(ex.id); return; } const fd = fileDoc(f.name, f.text, f.path); addDoc(fd.name, fd.text, fd.path, fd.text, fd.extra); }
+  try { const f = await platform.openFile(); if (!f) return; const ex = docs.find(d => d.path && d.path === f.path); if (ex) { openDoc(ex.id); return; }
+    if (/\.(tex|tikz)$/i.test(f.name)) { await importTikzText(f.text, f.name.replace(/\.(tex|tikz)$/i, '.bd')); return; }
+    const fd = fileDoc(f.name, f.text, f.path); addDoc(fd.name, fd.text, fd.path, fd.text, fd.extra); }
   catch (e: any) { toast('open failed: ' + (e.message || e)); }
 };
 $('bSave').onclick = (e) => saveDoc(doc(), (e as MouseEvent).shiftKey);
@@ -457,6 +553,14 @@ async function doExport(kind: string) {
   if (!lastCtx) { toast('fix the errors first'); return; }
   if (kind === 'html') { await exportHTML(); return; }
   if (kind === 'share') { await exportShare(); return; }
+  if (kind === 'live') { await startLive(); return; }
+  if (kind === 'pdf') { await exportPDF(); return; }
+  if (kind === 'usdz') {
+    try { const { toUSDZ } = await import('./render/export3d'); const data = await toUSDZ(viewer.content); if (await platform.exportFile(baseName() + '.usdz', data, 'model/vnd.usdz+zip') && platform.kind === 'desktop') toast('exported ' + baseName() + '.usdz'); }
+    catch (e: any) { toast('USDZ export failed: ' + (e?.message || e)); }
+    return;
+  }
+  if (kind === 'tikz') { await exportTikzDialog(); return; }
   if (kind === 'video') { exportVideo(); return; }
   if (kind === 'glb') {
     try { const { toGLB } = await import('./render/export3d'); const data = await toGLB(viewer.content, { skipTextured: true }); await platform.exportFile(baseName() + '.glb', data, 'model/gltf-binary'); if (platform.kind === 'desktop') toast('exported ' + baseName() + '.glb'); }
@@ -497,11 +601,11 @@ async function collectLabels(source: string): Promise<{ tex: Record<string, stri
 }
 async function collectLabelsNow(source: string): Promise<{ tex: Record<string, string>; complete: boolean }> {
   const { explorerScene } = await import('./explore/explorer');
-  const t0 = performance.now(); const first = runProgram(source, 0, { measure: measureTex }); const cost = performance.now() - t0;
+  const t0 = performance.now(); const first = runProgram(source, 0, runHooks()); const cost = performance.now() - t0;
   // sample the timeline densely for light pages, more sparsely for heavy ones (keeps export to a few seconds)
   const dur = first.duration ?? 6, N = first.usesT ? Math.max(16, Math.min(60, Math.round(2500 / Math.max(1, cost)))) : 0;
   const visit = (t: number, explore: boolean) => {
-    const ctx = runProgram(source, t, { measure: measureTex });
+    const ctx = runProgram(source, t, runHooks());
     for (const p of ctx.prims) if (p.kind === 'tex') getTex(p.src, p.display);
     if (explore) for (let i = 0; i < ctx.frames.length; i++) {
       const sc = explorerScene(ctx, i, null, null, false);   // sampling density doesn't change labels
@@ -634,6 +738,58 @@ function exportVideo() {
   };
 }
 
+// ---- PDF (vector; a deck becomes one page per slide) and TikZ
+async function exportPDF() {
+  const d = doc(); if (!d || !lastCtx) return;
+  toast('making the PDF…');
+  try {
+    const { svgToPDF } = await import('./render/pdf');
+    const n = Math.max(1, slideList.length), pages: { svg: string; w: number; h: number }[] = [];
+    for (let k = 0; k < n; k++) {
+      // a deck's slides are printed as they end (everything that fades or builds in is there)
+      let ctx = lastCtx!;
+      if (n > 1) { const h = { measure: measureTex, sliders: d.vals, slide: k }; ctx = runProgram(editor.value, 0, h); if (ctx.usesT) ctx = runProgram(editor.value, ctx.duration ?? 6, h); }
+      pages.push({ svg: exportSVG(ctx, inkSVG(d.ink, ctx.page.h, n > 1 ? k : 0)), w: ctx.page.w, h: ctx.page.h });
+    }
+    const data = await svgToPDF(pages);
+    if (await platform.exportFile(baseName() + '.pdf', data, 'application/pdf') && platform.kind === 'desktop') toast('exported ' + baseName() + '.pdf');
+    else if (platform.kind === 'web') toast(n > 1 ? `PDF with ${n} slides downloaded` : 'PDF downloaded');
+  } catch (e: any) { toast('PDF export failed: ' + (e?.message || e)); console.error(e); }
+}
+async function exportTikzDialog() {
+  const d = doc(); if (!d || !lastCtx) return;
+  const { exportTikZ } = await import('./render/tikz');
+  const code = exportTikZ(lastCtx, { ink: d.ink, slide: d.slide ?? 0 });
+  const big = code.length > 400_000;
+  modal(`<h3>TikZ code</h3><p style="margin:4px 0 8px;line-height:1.5">The page${slideList.length ? ' (this slide)' : ''} as a TikZ picture: labels become real LaTeX, so they use your document's fonts. It compiles on its own with pdflatex, or paste the <code>tikzpicture</code> into your document (needs <code>tikz</code> and <code>amsmath</code>).${big ? '<br><span style="color:#e0a24a">This page has detailed 3D surfaces, so the code is long (' + (code.length / 1e6).toFixed(1) + ' MB) and slow to compile. Fewer samples (n) make it shorter.</span>' : ''}</p>
+    <textarea id="xTikz" readonly spellcheck="false" style="width:100%;height:240px;box-sizing:border-box;font:11px var(--mono);background:#1b1b1b;color:#ddd;border:1px solid #444;border-radius:4px;padding:6px;white-space:pre">${esc(big ? code.slice(0, 20000) + '\n% … (download the file for the rest)' : code)}</textarea>
+    <div class="row" style="margin-top:10px"><span>${code.split('\n').length.toLocaleString()} lines</span><button class="vbtn" id="xClose">Close</button><button class="vbtn" id="xCopy">Copy</button><button class="vbtn primary" id="xDl">Download .tex</button></div>`);
+  $('xClose').onclick = closeModal;
+  $('xCopy').onclick = async () => { try { await navigator.clipboard.writeText(code); toast('TikZ code copied'); } catch { toast('copy was blocked: download the file instead'); } };
+  $('xDl').onclick = () => platform.exportFile(baseName() + '.tex', code, 'application/x-tex').then(ok => { if (ok && platform.kind === 'desktop') toast('exported ' + baseName() + '.tex'); });
+}
+async function importTikzText(text: string, name = 'imported-tikz.bd') {
+  try {
+    const { importTikZ } = await import('./import/tikz');
+    const r = importTikZ(text);
+    addDoc(name, r.code, undefined, '');
+    if (r.warnings.length) {
+      modelWarnings = r.warnings.map(w => 'TikZ import skipped or simplified: ' + w);
+      compile(false); setTimeout(() => { modelWarnings = []; }, 0);
+      toast(`imported, with ${r.warnings.length} note${r.warnings.length > 1 ? 's' : ''}: see Problems`);
+    } else toast('imported: the page is plain code now, edit it freely');
+    return true;
+  } catch (e: any) { toast('could not import: ' + (e?.message || e)); return false; }
+}
+function importTikzDialog() {
+  modal(`<h3>Import TikZ or pgfplots</h3><p style="margin:4px 0 8px;line-height:1.5">Paste a <code>tikzpicture</code> (or just its <code>\\draw</code>, <code>\\node</code>, <code>\\addplot</code> lines). You get an editable LaTeX Modeler page you can orbit, animate and export. Lines, shapes, arcs, nodes, <code>\\foreach</code>, plots and pgfplots axes (2D and <code>\\addplot3</code> surfaces) come across; anything else is listed under Problems.</p>
+    <textarea id="xTin" spellcheck="false" placeholder="\\begin{tikzpicture}&#10;  \\draw[->] (0,0) -- (2,1) node[right] {$v$};&#10;\\end{tikzpicture}" style="width:100%;height:220px;box-sizing:border-box;font:12px var(--mono);background:#1b1b1b;color:#ddd;border:1px solid #444;border-radius:4px;padding:6px"></textarea>
+    <div class="row" style="margin-top:10px"><span>or open a .tex file with Open…</span><button class="vbtn" id="xClose">Cancel</button><button class="vbtn primary" id="xImp">Import</button></div>`);
+  const ta = $<HTMLTextAreaElement>('xTin'); ta.focus();
+  $('xClose').onclick = closeModal;
+  $('xImp').onclick = async () => { if (!ta.value.trim()) { ta.focus(); return; } if (await importTikzText(ta.value)) closeModal(); };
+}
+
 // ---- share links: the page's code travels inside the link itself
 async function exportShare() {
   let url: string;
@@ -661,6 +817,7 @@ async function openShared(hash: string): Promise<boolean> {
   return true;
 }
 window.addEventListener('hashchange', () => {
+  const wt = parseWatch(location.hash); if (wt) { if (!watching) startWatching(wt); return; }
   if (/^#s=/.test(location.hash)) { openShared(location.hash); return; }
   let h = ''; try { h = decodeURIComponent(location.hash.slice(1)); } catch { return; }
   if (!h) { if (current) showHome(); return; }
@@ -693,6 +850,8 @@ window.addEventListener('keydown', e => {
   else if (e.key === 'f' || e.key === 'F') $('bReset').click();
   else if (e.key === 'o' || e.key === 'O') $('bOrtho').click();
   else if ((e.key === 'e' || e.key === 'E') && !explorer?.isOpen && chips.first()) openExplore(chips.first()!);
+  else if ((e.key === 'PageDown' || e.key === 'PageUp') && slideList.length) { e.preventDefault(); setSlide((doc()?.slide ?? 0) + (e.key === 'PageDown' ? 1 : -1)); }
+  else if (e.key === 'F5' && slideList.length) { e.preventDefault(); startPresenting(); }
 });
 
 // ------------------------------------------------------------------ splitter
@@ -707,7 +866,7 @@ split.addEventListener('pointerdown', e => {
 // ------------------------------------------------------------------ ink, laser and live recording
 const inkBar = $('inkBar');
 if (matchMedia('(pointer: coarse)').matches) inkBar.querySelector('.inote')!.textContent = 'one finger draws · two fingers turn and zoom';
-ink.onChange = () => { const d = doc(); if (!d) return; d.ink = ink.strokes.length ? ink.strokes.map(s => ({ ...s, pts: s.pts.map(v => +v.toFixed(2)) })) : undefined; persist(); updateTabs(); };
+ink.onChange = () => { const d = doc(); if (!d) return; d.ink = ink.strokes.length ? ink.strokes.map(s => ({ ...s, pts: s.pts.map(v => +v.toFixed(2)) })) : undefined; persist(); updateTabs(); live?.doc(); };
 function setInk(on: boolean) {
   if (on && !current) return;
   ink.setOn(on); inkBar.classList.toggle('show', on); $('bInk').classList.toggle('on', on); $('gl').classList.toggle('inking', on);
@@ -777,6 +936,149 @@ function stopRec() {
   const b = inkBar.querySelector<HTMLElement>('[data-act=rec]')!; b.classList.remove('live'); b.textContent = '● Record'; $('recTime').textContent = '';
 }
 
+// ------------------------------------------------------------------ sliders and slides
+let slideRedraw = 0;
+controls.onChange = (name, value) => {
+  const d = doc(); if (!d) return;
+  if (name === null) d.vals = undefined; else (d.vals ??= {})[name] = value;
+  persist();
+  cancelAnimationFrame(slideRedraw); slideRedraw = requestAnimationFrame(() => { compile(false); live?.state(); });
+};
+/** the slides of the latest run, for the slide bar, the presenter window and live viewers */
+let slideList: { title: string; notes: string; line: number }[] = [];
+function updateSlides(ctx: RunCtx) {
+  slideList = ctx.slides;
+  const n = ctx.slides.length, k = doc()?.slide ?? 0;
+  $('slNav').style.display = n ? '' : 'none'; $('bPresent').style.display = n ? '' : 'none';
+  $('slNum').textContent = `${k + 1} / ${n}`;
+  ($('slPrev') as HTMLButtonElement).disabled = k <= 0; ($('slNext') as HTMLButtonElement).disabled = k >= n - 1;
+  presenter?.update();
+}
+function setSlide(k: number, fromCursor = false) {
+  const d = doc(); if (!d || !slideList.length) return;
+  k = Math.max(0, Math.min(slideList.length - 1, k)); if (k === (d.slide ?? 0)) return;
+  d.slide = k; persist();
+  compile(false);
+  // each slide starts from its own camera (view() in the slide) or the flat page
+  if (lastCtx?.cam) { setFollow(true); applyCam(); } else { setFollow(false); viewer.place(0, 0, 1); }
+  if (!fromCursor && document.activeElement !== editor.ta) editor.goTo(slideList[k].line);
+  live?.state();
+}
+const presenter = new Presenter({
+  slides: () => slideList,
+  current: () => doc()?.slide ?? 0,
+  go: k => setSlide(k),
+  shot: k => thumbs.slide(editor.value, { sliders: doc()?.vals, slide: k }),
+  name: () => docName(),
+  autoplay: () => { tCur = 0; updateTime(); if (usesT) { compile(false); setPlaying(true); } else setPlaying(false); },
+  stopped: () => { setPlaying(false); viewer.resize(); },
+  blocked: () => toast('allow pop-ups for this site to see your notes, next slide and timer'),
+}, $('app'), $('gl'));
+function startPresenting() { if (!slideList.length) { toast('this page has no slides: add slide("Title") to make a deck'); return; } if (ink.on) setInk(false); presenter.begin(); }
+$('bPresent').onclick = () => startPresenting();
+$('slPrev').onclick = () => setSlide((doc()?.slide ?? 0) - 1);
+$('slNext').onclick = () => setSlide((doc()?.slide ?? 0) + 1);
+/** the editor cursor picks the slide it's in */
+function slideAtLine(l: number) { let k = 0; slideList.forEach((s, i) => { if (s.line <= l) k = i; }); return k; }
+
+// ------------------------------------------------------------------ AR
+let arKind: 'webxr' | 'quicklook' | null = null;
+(async () => {
+  try { if ((navigator as any).xr && await (navigator as any).xr.isSessionSupported('immersive-ar')) arKind = 'webxr'; } catch { /* no WebXR */ }
+  if (!arKind && document.createElement('a').relList?.supports?.('ar')) arKind = 'quicklook';
+  if (arKind) $('bAR').style.display = '';
+})();
+$('bAR').onclick = async () => {
+  if (!lastCtx || !arKind) return;
+  if (ink.on) setInk(false);
+  try {
+    const ar = await import('./render/ar');
+    if (arKind === 'webxr') await ar.startWebXR(viewer, lastCtx.page);
+    else { toast('opening AR…'); await ar.quickLook(viewer, docName()); }
+  } catch (e: any) { toast(e?.message || String(e)); }
+};
+
+// ------------------------------------------------------------------ live presenting
+let live: LiveHost | null = null, liveDocT = 0;
+function camState(): number[] {
+  const c = viewer.camera as any, T = viewer.controls.target;
+  return [...c.position.toArray(), ...c.quaternion.toArray(), ...c.up.toArray(), ...T.toArray(), c.zoom ?? 1].map((v: number) => +v.toFixed(4));
+}
+function setCamState(a: number[]) {
+  const c = viewer.camera as any;
+  c.position.fromArray(a, 0); c.quaternion.fromArray(a, 3); c.up.fromArray(a, 7); viewer.controls.target.fromArray(a, 10);
+  if (a[13]) { c.zoom = a[13]; c.updateProjectionMatrix?.(); }
+  viewer.controls.update(); viewer.dirty = true;
+}
+async function startLive() {
+  if (!live?.on) {
+    live = new LiveHost(
+      () => ({ name: docName(), source: joinInk(editor.value, doc()?.ink) }),
+      (): LiveState => ({ slide: doc()?.slide ?? 0, t: +tCur.toFixed(3), playing, vals: { ...(doc()?.vals ?? {}) }, cam: camState(), ortho: viewer.isOrtho }));
+    live.onChange = () => { const n = live?.viewers ?? 0; $('liveChip').style.display = live?.on ? '' : 'none'; $('liveChip').textContent = `● Live · ${n}`; if ($('xLive')) $('xLiveN').textContent = n === 1 ? '1 person watching' : `${n} people watching`; };
+    toast('starting a live session…');
+    try { await live.start(); } catch (e: any) { toast(e.message || String(e)); live = null; return; }
+  }
+  const url = live!.link;
+  modal(`<h3 id="xLive">Present live</h3><p style="margin:4px 0 10px;line-height:1.5">Send this link to the people watching. They see this page in their browser and follow your slides, camera, sliders, timeline and ink as you go, until you stop. Edits you make show up for them too.
+    Your browser connects straight to theirs; the page isn't uploaded anywhere. Anyone with the link can watch.</p>
+    <input id="xLink" readonly style="width:100%;box-sizing:border-box;font:12px var(--mono);padding:6px;background:#1b1b1b;color:#ddd;border:1px solid #444;border-radius:4px" value="${esc(url)}">
+    <div class="row" style="margin-top:10px"><span id="xLiveN">${live!.viewers} watching</span><button class="vbtn" id="xStop">Stop presenting live</button><button class="vbtn" id="xClose">Close</button><button class="vbtn primary" id="xCopy">Copy link</button></div>`);
+  live!.onChange?.();
+  const inp = $<HTMLInputElement>('xLink'); inp.onfocus = () => inp.select();
+  $('xClose').onclick = closeModal;
+  $('xStop').onclick = () => { live?.stop(); live = null; $('liveChip').style.display = 'none'; closeModal(); toast('live session ended'); };
+  $('xCopy').onclick = async () => { try { await navigator.clipboard.writeText(url); toast('link copied'); } catch { inp.focus(); inp.select(); toast('press Ctrl+C to copy'); } };
+}
+$('liveChip').onclick = () => startLive();
+$('mWrite').onclick = () => openWritePad({ action: 'Model it', onUse: tex => { mIn.value = tex; modelIt(); } });
+viewer.onUserCamera = ((prev) => () => { prev(); live?.state(); })(viewer.onUserCamera);
+
+/* watching someone else's page */
+let watching: LiveViewer | null = null, wFollow = true;
+function startWatching(target: { id: string; key: string }) {
+  $('app').classList.add('watching'); viewer.resize();
+  setHash('');
+  const w = new LiveViewer(target); watching = w;
+  const bar = $('watchBar');
+  w.onStatus = () => {
+    bar.classList.toggle('live', w.status === 'live');
+    $('watchMsg').textContent = w.status === 'connecting' ? 'Connecting to the presenter…' : w.status === 'live' ? `Live: ${doc()?.name.replace(/\.bd$/, '') ?? ''}` : w.status === 'ended' ? 'The presenter ended the session. You can keep a copy.' : "Couldn't reach the presenter. The link may be old, or the session has ended.";
+  };
+  w.onDoc = dd => {
+    const { code, ink: strokes } = splitInk(dd.source);
+    let d = docs.find(x => x.live);
+    if (!d) { d = { id: 'live', name: dd.name, text: code, saved: code, live: true }; docs.push(d); }
+    d.name = dd.name; d.text = d.saved = code; d.ink = strokes;
+    if (current !== d.id) openDoc(d.id);
+    else { editor.value = code; ink.set(d.ink); compile(false); }
+    w.onStatus?.();
+  };
+  w.onState = st => {
+    const d = docs.find(x => x.live); if (!d || !wFollow || current !== d.id) return;
+    const slideChanged = (d.slide ?? 0) !== st.slide;
+    d.slide = st.slide; d.vals = st.vals; tCur = Math.min(st.t, duration); updateTime();
+    if (viewer.isOrtho !== st.ortho) { viewer.setOrtho(st.ortho); $('bOrtho').classList.toggle('on', st.ortho); }
+    compile(false);
+    if (st.cam) { followCam = false; setCamState(st.cam); }
+    if (slideChanged && !st.cam) viewer.place(0, 0, 1);
+  };
+  w.join();
+}
+const setWFollow = (f: boolean) => { wFollow = f; $('wFollow').classList.toggle('on', f); };
+$('wFollow').onclick = () => { setWFollow(!wFollow); if (wFollow) toast('following the presenter again'); };
+viewer.onUserCamera = ((prev) => () => { prev(); if (watching && wFollow) { setWFollow(false); toast('you moved the view: press Follow to go back to the presenter'); } })(viewer.onUserCamera);
+function stopWatching(keep: boolean) {
+  watching?.leave(); watching = null;
+  $('app').classList.remove('watching');
+  const d = docs.find(x => x.live);
+  if (d) { if (keep) { d.live = false; d.id = 'd' + Date.now().toString(36); d.saved = ''; current = d.id; openDoc(d.id); toast('saved as your own copy'); } else { docs = docs.filter(x => x !== d); showHome(); } }
+  else showHome();
+  viewer.resize(); persist();
+}
+$('wCopy').onclick = () => stopWatching(true);
+$('wLeave').onclick = () => stopWatching(false);
+
 // ------------------------------------------------------------------ main loop
 let lastFrame = performance.now();
 function frame(now: number) {
@@ -784,6 +1086,7 @@ function frame(now: number) {
   const dt = Math.min(0.1, (now - lastFrame) / 1000); lastFrame = now;
   if (playing) { let t = tCur + dt; if (t >= duration) t %= duration; setTime(t); viewer.dirty = true; }
   ink.tick(now);
+  if (live?.viewers) live.state();   // throttled, and only sends when something changed
   if (rec) viewer.dirty = true;   // recording: keep frames coming even when nothing moves
   viewer.tick();
   chips.position();
@@ -802,8 +1105,9 @@ async function boot() {
   if (init?.board) { location.replace('./board/?openfile=1'); return; }   // a .screenboard file opens in board mode
   let target = '';
   const shareHash = /^#s=/.test(location.hash) ? location.hash : '';
+  const watchTarget = parseWatch(location.hash);
   if (init) { const ex = docs.find(d => d.path === init.path); if (ex) target = ex.id; else { const fd = fileDoc(init.name, init.text, init.path); const d: Doc = { id: 'f' + Date.now(), name: fd.name, text: fd.text, saved: fd.text, path: fd.path, ...fd.extra }; docs.push(d); target = d.id; } }
-  else if (!shareHash) {
+  else if (!shareHash && !watchTarget) {
     let h = ''; try { h = decodeURIComponent(location.hash.slice(1)); } catch { /* ignore */ }
     if (h) {
       const open = docs.find(d => slug(d.name) === h);
@@ -813,9 +1117,10 @@ async function boot() {
   }
   renderPanel();
   viewer.resize();
-  if (target) openDoc(target);
+  if (watchTarget) startWatching(watchTarget);
+  else if (target) openDoc(target);
   else if (!current && !(shareHash && await openShared(shareHash))) showHome();
   requestAnimationFrame(frame);
-  (window as any).__bdraw = { get explorer() { return explorer; }, openExplore, chips, compile, setTime, viewer, get autoModel() { return modeller?.autoModel; }, modelIt, get problems() { return problems; }, get ctx() { return lastCtx; }, exportSVG: () => lastCtx && exportSVG(lastCtx), openDoc, docs: () => docs, editor, load: (c: string) => addDoc('test.bd', c, undefined, c), showHome, home, thumbs, openExample };
+  (window as any).__bdraw = { get explorer() { return explorer; }, openExplore, chips, compile, setTime, viewer, get autoModel() { return modeller?.autoModel; }, modelIt, get problems() { return problems; }, get ctx() { return lastCtx; }, exportSVG: () => lastCtx && exportSVG(lastCtx), openDoc, docs: () => docs, editor, get live() { return live; }, setSlide, load: (c: string) => addDoc('test.bd', c, undefined, c), showHome, home, thumbs, openExample };
 }
 boot().catch(e => { const l = $('loading'); if (l) l.innerHTML = `<div style="color:#f88;padding:20px">Failed to start: ${esc(String(e?.message || e))}</div>`; console.error(e); });

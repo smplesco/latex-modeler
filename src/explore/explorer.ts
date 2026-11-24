@@ -36,6 +36,8 @@ export interface ExplorerHost {
   snapshot?: (dataUrl: string, name: string) => void;
   save?: (name: string, data: Uint8Array, mime: string) => void;
   title?: () => string;
+  /** extra things the page runs with: the reader's slider values and the slide shown */
+  hooks?: () => { sliders?: Record<string, number>; slide?: number };
 }
 
 /** throw-away 3D helpers drawn over the figure (probe markers, sections, arrows, labels) */
@@ -300,7 +302,7 @@ export class Explorer {
   rebuild(hq: boolean, resetCam = false) {
     const v = this.viewer!; const src = this.host.source();
     let ctx: RunCtx;
-    try { ctx = runProgram(src, this.t, { measure: this.host.measure, overrides: this.overrides }); }
+    try { ctx = runProgram(src, this.t, { ...this.host.hooks?.(), measure: this.host.measure, overrides: this.overrides }); }
     catch (e: any) { this.read(`The page has an error, fix it first:\n${e.message}${e.line ? ` (line ${e.line})` : ''}`); return; }
     if (this.fig !== null) { this.rebuildFree(ctx, resetCam || !this.T); return; }
     const T = ctx.frames[this.idx];

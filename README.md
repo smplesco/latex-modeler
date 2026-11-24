@@ -13,7 +13,7 @@ Runs in the browser, or as a Windows / macOS / Linux desktop app (Tauri).
 - start a **board** (chalkboard, whiteboard or slate), or reopen a recent one.
 - go back to the pages you already have open.
 
-**Boards.** Board mode lives at **latexmodeler.app/board**. It's Screenboard, which used to be a separate app: a freehand chalkboard and whiteboard for explaining things on a call, with markers, photos, PDFs, sticky notes, live sessions, recording and a library of your boards. Use **LaTeX Modeler** in its menu (or on its Home screen) to come back to pages. If you used Screenboard at its old address, open it once and press **Move my boards**: your library comes over in one step.
+**Boards.** Boards open as **tabs** next to your pages: a board keeps its place while you switch tabs, saves itself to your board library when you close its tab, and comes back after a reload (Ctrl-click a board card to open it in its own browser tab instead). Board mode also lives on its own at **latexmodeler.app/board**. It's Screenboard, which used to be a separate app: a freehand chalkboard and whiteboard for explaining things on a call, with markers, photos, PDFs, sticky notes, live sessions, recording and a library of your boards. Use **LaTeX Modeler** in its menu (or on its Home screen) to come back to pages. If you used Screenboard at its old address, open it once and press **Move my boards**: your library comes over in one step.
 
 **3D on boards.** Select an equation (or a text box with an equation) on a board and press the cube button, **Make it 3D**: LaTeX Modeler auto-models it and places the 3D figure next to it. Menu → **Add a LaTeX Modeler page** places any example, template or page you have open, as the whole page or just its figure. **Double-click** a figure to turn it around live (Play runs its animation, Open in LaTeX Modeler opens it as a page). Figures are pictures to everything else on the board, so they move, export, print and sync in live sessions like any image.
 
@@ -112,6 +112,20 @@ The installers end up in `src-tauri\target\release\bundle\msi\` and `...\bundle\
 * **GitHub Pages:** in the repository, go to **Settings → Pages → Source: GitHub Actions**. Every push to `main` then publishes the site (workflow `pages.yml`).
 * **itch.io or any static host:** run `npm run build` and upload the contents of `dist/` (zip it for itch.io as an HTML project).
 
+**Sliders.** `k = slider("k", 1, 0, 5)` gives the page a number the reader drags. A panel of sliders and checkboxes (`toggle("grid", 1)`) appears in the corner of the viewer; the page redraws as you drag. Values are remembered per page, Reset puts back the ones in the code, and they work in exported HTML pages and for people watching you present live. See **Examples › Sliders & decks › Parabola sliders**.
+
+**Simulations.** `ode(f, y0, t1)` solves a differential equation (Runge–Kutta), `odeat(f, y0, t)` gives the state at the timeline time so it animates, `spring(a, b)` draws a spring, `rand(i)` gives repeatable random numbers. The damped pendulum, spring-mass and Lorenz attractor examples use them with sliders.
+
+**Slide decks and presenting.** `slide("Title")` starts a slide and `notes("…")` adds speaker notes (anything before the first `slide()` is on every slide). The viewer gets a ‹ 1 / 4 › slide bar (PgUp / PgDn), and the editor follows: putting the cursor in a slide's code shows that slide. **▶ Present** (F5) goes full screen, plays each slide's animation as it comes up, and opens a **presenter window** with your notes (bigger or smaller with A+ / A−), the current and next slide, a timer and a clock. Ink and the laser pointer work on each slide separately. Start from the **Slide deck** template.
+
+**Presenting live.** Export ▾ → **Present live** gives you a link. Whoever opens it sees your page in their browser and follows along: slides, camera, sliders, timeline, ink and even edits you make to the code. They can press **Follow** off to look around on their own, and **Save a copy** to keep the page. Your browser connects straight to theirs (WebRTC); the page isn't uploaded anywhere.
+
+**Write it by hand.** **✎ Write** (on the start screen and in the Auto-model bar) opens a pad: write the equation with a finger, pen or mouse, and it's read into LaTeX as you go, on your device. Fix anything it got wrong, then model it. It reads digits, letters, Greek letters, operators, fractions, square roots, powers and subscripts, integrals and sums with limits, and names like sin, cos and log. On a **board**, select some pen strokes and press the new **handwriting** button to swap them for a typed equation (Undo brings the strokes back).
+
+**AR.** On phones and tablets that support it, an **AR** button appears in the viewer: on Android (Chrome) the camera finds a table and a tap puts the page down, its 3D figures standing up off it; walk around it, and switch between table size and real size. On iPhone and iPad it opens in AR Quick Look. Export ▾ → **3D model for AR (USDZ)** saves the same model.
+
+**TikZ and pgfplots.** **Import TikZ…** on the start screen (or opening a `.tex` file) turns TikZ or pgfplots code into an editable page: lines, shapes, arcs, Bézier curves, grids, nodes, named coordinates, `\foreach`, plots, colours and arrows, and pgfplots axes with functions, coordinate lists, parametric curves, legends and `\addplot3` surfaces. Anything it can't convert is listed under Problems, never dropped silently. The other way, Export ▾ → **TikZ code** gives the page as a `tikzpicture` (labels as real LaTeX, 3D figures drawn back to front) that compiles with pdflatex, and **PDF** gives a vector PDF, one page per slide for a deck.
+
 ---
 
 ## Using LaTeX Modeler
@@ -179,6 +193,8 @@ Every plot frame on the page, and every hand-drawn 3D figure made with `onpage(.
 * **Export ▾:**
   * **Page as SVG:** vector output for print or Inkscape.
   * **Page as PNG:** 200 dpi.
+  * **PDF:** vector; a deck gives one page per slide, each shown as it ends.
+  * **TikZ code:** a standalone `.tex` file, or paste the `tikzpicture` into your own document.
   * **Current view as PNG:** what you see on screen.
   * **Share link:** the page's code compressed into a link (after the `#`, so nothing is uploaded anywhere). Whoever opens it gets a live copy of the page in the web app. Links made in the desktop app point to latexmodeler.app.
   * **Interactive HTML (3D):** one self-contained `.html` file with the page, the 3D viewer, the timeline and the Figure Explorer built in. Send it to anyone: it opens in Chrome, Edge, Firefox or Safari by double-clicking it, with nothing to install, and has an **Open in LaTeX Modeler** button for an editable copy. Two sizes:
@@ -186,6 +202,8 @@ Every plot frame on the page, and every hand-drawn 3D figure made with `onpage(.
     * **Full (≈ 2.8 MB):** includes the whole LaTeX engine, so everything works offline, always.
     It can also be uploaded to itch.io (as an HTML project), GitHub Pages, Google Sites (Embed → code) or a learning platform that accepts HTML files.
   * **3D model (GLB):** the whole page as a 3D scene.
+  * **3D model for AR (USDZ):** for iPhone and iPad AR Quick Look.
+  * **Present live:** a link others open to follow along as you present.
   * **Video or GIF…:** records the view as MP4 (or WebM where MP4 isn't available) or an animated GIF: a swing or full turn around the page, or the page's own animation, at 640×360 up to 1920×1080. Frames are rendered one by one, so the video is smooth however heavy the page is.
   * **Copy page code**
 
@@ -201,6 +219,8 @@ Every plot frame on the page, and every hand-drawn 3D figure made with `onpage(.
 | Ctrl+/ | toggle comment |
 | Space · F · O (in the viewer) | play, reset view, ortho |
 | E | open the first figure in the explorer (Esc closes it) |
+| PgUp / PgDn · F5 | previous / next slide · present |
+| ← → Space (presenting) | move between slides; Esc ends |
 
 ### The `.bd` language in one minute
 
@@ -215,6 +235,9 @@ splot(B, (x, y) => sin(x * y))              // also: psurf isoplot quiver pplot 
 dot(B.map((0, 0, 0)), {r: 1, color: "#d64545"})
 for k in 0..5 { line((20, 30 + 4 * k), (60, 30 + 4 * k)) }
 c = 1 + 0.5 * sin(t)                        // t = timeline time → animation
+k = slider("k", 1, 0, 5)                    // a number the reader drags
+s = odeat((t, y) => (y.y, -k * y.x), (1, 0), t)   // solve y'' = -k y, state at time t
+slide("Results", {notes: "say this"})       // everything after it is on this slide
 ```
 
 The **Reference** tab at the bottom of the app lists every function.
@@ -246,6 +269,13 @@ src/render/ink.ts  pen, highlighter and laser on pages
 src-tauri/    desktop wrapper (Rust): dialogs, file access, .bd and .screenboard file associations
 src/sw-template.js + src/offline.ts  the web app's service worker (vite.config.ts fills in the file list at build time)
 src/inkfile.ts  how ink is written into and read back out of a .bd file
+src/lang/extras.ts  slider, toggle, slide, notes, ode, odeat, spring, rand
+src/ui/controls.ts, src/ui/present.ts  the slider panel; presenting and the presenter window
+src/live.ts   presenting live (PeerJS / WebRTC)
+src/render/tikz.ts, src/render/pdf.ts, src/import/tikz.ts  TikZ export, PDF export, TikZ / pgfplots import
+src/render/ar.ts  AR (WebXR on Android, Quick Look on iOS)
+src/hand/     handwriting → LaTeX (templates.json is built by scripts/hand-templates.mts)
+src/ui/writepad.ts  the handwriting pad
 tests/run.ts  auto-model corpus, calculus, examples and templates
 tests/board-smoke.mjs  board mode in a real browser (`npm run test:board`; first time: `npx playwright install chromium`)
 .github/workflows/  CI, desktop release builds, GitHub Pages

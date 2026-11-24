@@ -1,0 +1,21 @@
+// Lorenz attractor — a chaotic system integrated with ode(); drag rho to watch it settle or go wild, orbit to see it in 3D.
+page("A5", "paper")
+duration(10)
+
+sig = 10
+rho = slider("rho", 28, 10, 40, {label: "\rho", step: 0.5})
+bet = 8 / 3
+
+tex("\textbf{The Lorenz attractor}", (74, 196), {size: 16})
+tex("\dot x = \sigma(y - x),\quad \dot y = x(\rho - z) - y,\quad \dot z = xy - \beta z", (74, 186), {size: 9.5, color: "#555"})
+
+f(s, p) = (sig * (p.y - p.x), p.x * (rho - p.z) - p.y, p.x * p.y - bet * p.z)
+ys = ode(f, (1, 1, 1), 30, {n: 6000})
+
+F = frame3d((74, 100), 118, (-25, 25), (-30, 30), (0, 55), {labels: ["x", "y", "z"]})
+// the curve, drawn up to the current time so it grows as the timeline plays
+n = max(2, floor(6000 * t / 10))
+line(map(ys, p => F.map(p)), {color: "#c7d2de", width: 0.15})
+line(map(range(n), i => F.map(ys[i])), {color: "#2b6cb0", width: 0.3})
+dot(F.map(ys[n - 1]), {r: 1, color: "#d64545"})
+tex("\sigma = 10,\quad \beta = 8/3,\quad \rho = " + fmt(rho, 1), (74, 26), {size: 10})

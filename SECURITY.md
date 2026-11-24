@@ -92,8 +92,41 @@ Things I especially want to hear about:
   stores files from this site, never pages from other sites or anything you type.
   Board mode keeps its own copy the same way (`board/sw.js`). Neither is used in
   the desktop app.
+- **Sliders and slides.** The values you set on sliders, and the slide you're on,
+  are kept with the page in this browser's storage. Slider values given to the page
+  are only ever numbers, clamped to each slider's range.
+- **Handwriting** is read on your device (the recogniser and the letter shapes it
+  compares with ship with the app). Nothing you write is sent anywhere.
+- **TikZ import** only reads the code you paste or open: it never runs LaTeX or
+  fetches anything, and what it makes is an ordinary page you can read.
+- **PDF and TikZ exports** are made on your device and downloaded.
+- **AR.** On Android the camera feed goes to the browser's AR system to find a
+  surface; LaTeX Modeler never sees or records it. On iPhone and iPad the page is
+  handed to the system's AR Quick Look as a model file made on your device.
+- **The presenter window** is a second window of this same page (the browser may
+  ask you to allow pop-ups); it shows nothing that isn't already in the page.
+- **Board tabs.** A board opened from the start screen runs in a frame from this
+  same site. The two only exchange the board's name and id, and a "save now"
+  request when you close its tab; messages from anywhere else are ignored.
 - **Live recording** captures only the 3D viewer, plus your microphone if you tick
   "mic" (the browser asks first). The video is made on your device and downloaded.
+
+## Pages: presenting live (security model)
+
+- **Peer to peer.** Your browser connects straight to each viewer's browser over
+  WebRTC (encrypted). A public PeerJS server (`0.peerjs.com`) only introduces the
+  browsers to each other; the page itself never passes through it, and nothing
+  is uploaded or stored anywhere. The PeerJS library is the same pinned copy board
+  mode uses, checked with Subresource Integrity.
+- **The link is the key.** A live link holds a random session id and a random
+  10-character key after the `#` (never sent to a server). A viewer who doesn't
+  send the right key within 15 seconds is disconnected without seeing anything.
+  Anyone you give the link to can watch, until you press **Stop presenting live**.
+- **What viewers get:** the page's code and ink, the slide, the timeline time,
+  slider values and the camera. Viewers send nothing back except the key. What
+  arrives is checked before it's used (sizes, numbers within limits, at most 40
+  sliders); a page that arrives is run like any other page, so it can only draw.
+- **Viewers' copies** aren't kept unless they press **Save a copy**.
 
 ## Boards: LaTeX Modeler figures on a board
 

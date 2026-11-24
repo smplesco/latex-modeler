@@ -1,0 +1,12 @@
+\begin{tikzpicture}[scale=2]
+  \draw[help lines] (-1.4,-1.4) grid[step=0.5] (1.4,1.4);
+  \draw[->, thick] (-1.5,0) -- (1.5,0) node[right] {$x$};
+  \draw[->, thick] (0,-1.5) -- (0,1.5) node[above] {$y$};
+  \draw[blue, very thick] (0,0) circle (1);
+  \coordinate (P) at (40:1);
+  \draw[red, thick] (0,0) -- (P) node[above right] {$P(\cos\theta, \sin\theta)$};
+  \draw[dashed] (P) -- (P |- 0,0);
+  \draw (0.3,0) arc (0:40:0.3);
+  \node at (20:0.45) {$\theta$};
+  \filldraw[black] (P) circle (0.03);
+\end{tikzpicture}

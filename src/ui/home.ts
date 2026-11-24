@@ -16,6 +16,9 @@ export interface HomeHost {
   openExample(item: LibItem): void;
   model(tex: string): void;
   openFile(): void;
+  importTikz(): void;
+  openBoard(query: string, name?: string): void;
+  write(): void;
   quickEquations: { label: string; tex: string }[];
 }
 
@@ -37,9 +40,9 @@ export class Home {
       <div class="hero">
         <h1>What are you making today?</h1>
         <p>Start from a template, open an example, or type an equation and LaTeX Modeler builds the page for you.</p>
-        <div class="heq"><span class="sig">∑</span><input id="hEq" spellcheck="false" autocomplete="off" placeholder="type LaTeX, e.g.  z = \\sin\\sqrt{x^2+y^2}  and press Enter"><button class="vbtn primary" id="hGo">Model it</button></div>
+        <div class="heq"><span class="sig">∑</span><input id="hEq" spellcheck="false" autocomplete="off" placeholder="type LaTeX, e.g.  z = \\sin\\sqrt{x^2+y^2}  and press Enter"><button class="vbtn" id="hWrite" title="Write the equation by hand">✎ Write</button><button class="vbtn primary" id="hGo">Model it</button></div>
         <div class="hchips"><span class="lead">try:</span>${this.host.quickEquations.map((q, i) => `<button class="chip" data-q="${i}" title="${esc(q.tex)}">${esc(q.label)}</button>`).join('')}
-          <span class="lead" style="margin-left:auto">have a .bd file? <button class="hlink" id="hFile">Open it…</button></span></div>
+          <span class="lead" style="margin-left:auto">have a .bd file? <button class="hlink" id="hFile">Open it…</button> · <button class="hlink" id="hTikz" title="Paste TikZ or pgfplots code and get an editable 3D page">Import TikZ…</button></span></div>
       </div>
       <section id="hOpen"></section>
       <section>
@@ -47,7 +50,7 @@ export class Home {
         <div class="grid" id="hTpl"></div>
       </section>
       <section id="hBoards">
-        <div class="shead"><h2>Boards</h2><span>draw freehand on a chalkboard or whiteboard, great for explaining things on a call</span><a class="vbtn" href="${BOARD_URL}?do=home">All boards</a></div>
+        <div class="shead"><h2>Boards</h2><span>draw freehand on a chalkboard or whiteboard, great for explaining things on a call</span><a class="vbtn" id="hAllBoards" href="${BOARD_URL}?do=home">All boards</a></div>
         <div class="grid" id="hBoardGrid"></div>
       </section>
       <section>
@@ -79,6 +82,9 @@ export class Home {
     eq.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); go(); } });
     this.el.querySelector<HTMLElement>('#hGo')!.onclick = go;
     this.el.querySelector<HTMLElement>('#hFile')!.onclick = () => this.host.openFile();
+    this.el.querySelector<HTMLElement>('#hTikz')!.onclick = () => this.host.importTikz();
+    this.el.querySelector<HTMLElement>('#hAllBoards')!.onclick = e => { if (e.ctrlKey || e.metaKey || e.shiftKey) return; e.preventDefault(); this.host.openBoard('?do=home', 'All boards'); };
+    this.el.querySelector<HTMLElement>('#hWrite')!.onclick = () => this.host.write();
     this.el.querySelectorAll<HTMLElement>('.hchips .chip').forEach(b => b.onclick = () => { const q = this.host.quickEquations[+b.dataset.q!]; eq.value = q.tex; this.host.model(q.tex); });
     // example filters
     this.el.querySelectorAll<HTMLElement>('#hFolders .chip').forEach(b => b.onclick = () => {
@@ -96,6 +102,8 @@ export class Home {
     g.innerHTML = '';
     const link = (href: string, th: string, title: string, about: string, foot: string) => {
       const a = document.createElement('a'); a.className = 'card board'; a.href = href;
+      // boards open as tabs here; Ctrl/Cmd-click still opens one in its own browser tab
+      a.onclick = e => { if (e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0) return; e.preventDefault(); this.host.openBoard(href.slice(href.indexOf('?')), title); };
       a.innerHTML = `<div class="th">${th}</div><div class="meta"><div class="t">${esc(title)}</div><div class="d">${esc(about)}</div><div class="f">${esc(foot)}</div></div>`;
       g.appendChild(a); return a;
     };

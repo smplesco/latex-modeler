@@ -9,7 +9,7 @@ import type { Viewer } from './viewer';
 
 export type InkTool = 'pen' | 'hl' | 'laser';
 /** one stroke: points as x, y, z in page millimetres; z = NaN means "on the paper" (follows the sheet) */
-export interface Stroke { tool: 'pen' | 'hl'; color: string; w: number; pts: number[] }
+export interface Stroke { tool: 'pen' | 'hl'; color: string; w: number; pts: number[]; /** on a deck: the slide it was drawn on */ slide?: number }
 
 const LASER_HOLD = 900, LASER_FADE = 700;
 
@@ -22,6 +22,9 @@ export class Ink {
   private ray = new THREE.Raycaster();
   private saved: any = null;
   private stencil = 0;
+  /** on a deck: the slide being shown (new strokes go on it, only its strokes are drawn) */
+  slide: number | undefined = undefined;
+  private shows = (s: Stroke) => this.slide === undefined || (s.slide ?? 0) === this.slide;
 
   constructor(private v: Viewer) {
     const el = v.renderer.domElement;
@@ -51,14 +54,16 @@ export class Ink {
     this.strokes = (Array.isArray(list) ? list : []).map(fix).filter(okStroke);
     this.redraw();
   }
-  undo() { if (this.strokes.pop()) { this.redraw(); this.onChange?.(); } }
-  clear() { if (this.strokes.length) { this.strokes = []; this.redraw(); this.onChange?.(); } }
+  /** undo / clear work on what's on screen (on a deck: this slide's ink) */
+  undo() { for (let i = this.strokes.length - 1; i >= 0; i--) if (this.shows(this.strokes[i])) { this.strokes.splice(i, 1); this.redraw(); this.onChange?.(); return; } }
+  clear() { const keep = this.strokes.filter(s => !this.shows(s)); if (keep.length !== this.strokes.length) { this.strokes = keep; this.redraw(); this.onChange?.(); } }
+  get visibleCount() { return this.strokes.filter(this.shows).length; }
 
   /** rebuild every stroke's line (after a page rebuild the paper may sit at a slightly different depth) */
   redraw() {
     const v = this.v;
     for (const c of [...v.ink.children]) { if (!this.lasers.some(l => l.line === c)) { v.ink.remove(c); this.disposeLine(c as Line2); } }
-    for (const s of this.strokes) v.ink.add(this.lineFor(s));
+    for (const s of this.strokes) if (this.shows(s)) v.ink.add(this.lineFor(s));
     v.dirty = true;
   }
   /** keep the laser fading: true while something is still animating */
@@ -121,6 +126,7 @@ export class Ink {
     const p = this.pointAt(e); if (!p) return;
     const laser = this.tool === 'laser';
     const s: Stroke = { tool: this.tool === 'hl' ? 'hl' : 'pen', color: laser ? '#ff3b30' : this.color, w: this.tool === 'hl' ? 4.5 : laser ? 1.1 : 0.6, pts: p };
+    if (this.slide !== undefined && this.slide > 0) s.slide = this.slide;
     this.drawing = { s, line: null, laser };
   }
   private move(e: PointerEvent) {

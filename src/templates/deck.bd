@@ -1,0 +1,29 @@
+// Slide deck — several slides with speaker notes. Press ▶ Present for full screen and the presenter window.
+page("slide", "dark", {stage: "present"})
+duration(6)
+// anything before the first slide() is on every slide: here, a thin footer
+line((14, 10), (240, 10), {color: "#2c3440", width: 0.3})
+text("Your talk · Your name", (14, 6), {size: 7, anchor: "w", color: "#6c7686"})
+
+slide("Title")
+notes("Welcome everyone. Today: one idea, three pictures.")
+tex("\textbf{Your talk title}", (20, 88), {size: 30, anchor: "w"})
+tex("\text{a subtitle that says what it is about}", (20, 72), {size: 14, anchor: "w", color: "#9fb3d1"})
+line((20, 63), (140, 63), {color: "#36b4ff", width: 0.6})
+
+slide("The idea")
+notes("State the main result first. The equation fades in with the timeline: it plays by itself when presenting.")
+tex("\textbf{The idea}", (20, 124), {size: 20, anchor: "w"})
+tex("\int_0^\infty e^{-x^2}\,dx = \frac{\sqrt\pi}{2}", (127, 72), {size: 28, opacity: clamp(t / 1.5, 0, 1)})
+
+slide("A picture")
+notes("Orbit to show this is a real surface. Press I to draw on it, L for the laser pointer.")
+tex("\textbf{A picture}", (20, 124), {size: 20, anchor: "w"})
+B = frame3d((127, 64), 100, (-2, 2), (-2, 2), (0, 1), {style: "axes", labels: ["x", "y", ""], ticks: 0})
+splot(B, (x, y) => exp(-x^2 - y^2), {n: 40, colormap: "cool"})
+view(0.5, 0.35, 1)
+
+slide("Thank you")
+notes("Questions.")
+tex("\textbf{Thank you}", (127, 78), {size: 30})
+tex("\text{questions?}", (127, 62), {size: 14, color: "#9fb3d1"})

@@ -2,6 +2,8 @@
 import { BdError, Vec, Mat, Closure, binop, truthy, typeName, isObj } from './values';
 import { lex, Parser } from './parser';
 import { makeBuiltins, PAGE_STYLES } from './builtins';
+import type { Control, Slide } from './extras';
+export type { Control, Slide };
 
 export class Env {
   vars = new Map<string, any>();
@@ -28,6 +30,10 @@ export interface RunCtx {
   figMeta: Record<number, { dim: number; free?: boolean; R?: number[][]; o?: number[]; s?: number; line?: number }>;
   frameSeq: number; role: any; curHook?: number; noHooks?: boolean; B?: Record<string, any>;
   overrides?: Record<string, number>; globalEnv?: Env;
+  /** slider() / toggle() controls the page made, with their current values */
+  controls: Control[]; controlValues?: Record<string, number>;
+  /** slide() calls: the deck's slides; slideNo is the slide being run, slideWant the one being shown */
+  slides: Slide[]; slideNo: number; slideWant: number;
   call: (f: any, args: any[]) => any; pageStyle: () => any; measure?: (src: string) => number | null;
 }
 
@@ -81,7 +87,8 @@ function makeInterpreter(ctx: RunCtx, root: Env) {
       case 'Id': {
         const e = env.find(n.name);
         if (!e) throw new BdError(`unknown name '${n.name}'`, n.line);
-        if (e === root && n.name === 't') ctx.usesT = true;      // only the global timeline t triggers re-evaluation
+        // only the global timeline t triggers re-evaluation (on a deck: only when the slide being shown uses it)
+        if (e === root && n.name === 't' && !(ctx.slides.length && ctx.slideNo >= 0 && ctx.slideNo !== ctx.slideWant)) ctx.usesT = true;
         return e.vars.get(n.name);
       }
       case 'Tuple': {
@@ -141,10 +148,12 @@ function makeInterpreter(ctx: RunCtx, root: Env) {
   return { exec, evalNode, call };
 }
 
-export function runProgram(src: string, t: number, hooks: { measure?: (s: string) => number | null; overrides?: Record<string, number>; style?: string } = {}): RunCtx {
+export interface RunHooks { measure?: (s: string) => number | null; overrides?: Record<string, number>; style?: string; sliders?: Record<string, number>; slide?: number }
+export function runProgram(src: string, t: number, hooks: RunHooks = {}): RunCtx {
   const ctx: RunCtx = {
     prims: [], page: { w: 210, h: 297, style: 'paper', stage: 'studio' }, defaults: { color: null, width: 0.25, size: 11 }, usesT: false, duration: null, cam: null,
     out: [], steps: 0, depth: 0, order: 0, line: 1, figs: 0, sites: [], frames: [], hooks: [], figMeta: {}, frameSeq: 0, role: null, overrides: hooks.overrides, call: null as any, pageStyle: null as any, measure: hooks.measure,
+    controls: [], controlValues: hooks.sliders, slides: [], slideNo: -1, slideWant: Math.max(0, Math.floor(hooks.slide ?? 0)),
   };
   // hooks.style draws the page as if it were on that paper (a figure placed on a dark board needs light ink)
   ctx.pageStyle = () => PAGE_STYLES[hooks.style && PAGE_STYLES[hooks.style] ? hooks.style : ctx.page.style];
@@ -157,6 +166,12 @@ export function runProgram(src: string, t: number, hooks: { measure?: (s: string
   const global = new Env(root);
   ctx.globalEnv = global; ctx.B = B;
   for (const s of ast.body) I.exec(s, global);
+  if (ctx.slides.length) {
+    // asked for a slide past the end (the deck got shorter): show the last one instead
+    if (ctx.slideWant >= ctx.slides.length) return runProgram(src, t, { ...hooks, slide: ctx.slides.length - 1 });
+    const shown = new Set(ctx.prims.map(p => p.fig));   // figures on other slides aren't on screen
+    ctx.frames = ctx.frames.filter(f => shown.has(f.fig));
+  }
   return ctx;
 }
 
@@ -174,6 +189,6 @@ export function tweakables(src: string): { name: string; value: number; line: nu
 }
 
 export const BUILTIN_NAMES = (() => {
-  const ctx: any = { prims: [], defaults: {}, pageStyle: () => ({}), call: () => null, frames: [], hooks: [], figMeta: {} };
+  const ctx: any = { prims: [], defaults: {}, pageStyle: () => ({}), call: () => null, frames: [], hooks: [], figMeta: {}, controls: [], slides: [] };
   return new Set(Object.keys(makeBuiltins(ctx)));
 })();

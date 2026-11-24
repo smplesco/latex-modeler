@@ -1,0 +1,36 @@
+// Damped pendulum — solved step by step with ode(); drag the length, the damping and the starting angle, then press play.
+page("A5 landscape", "paper")
+duration(12)
+
+L = slider("L", 1.2, 0.3, 2, {label: "\ell\ (\mathrm{m})", step: 0.05})
+gam = slider("damping", 0.25, 0, 1.5, {label: "\gamma\ (\mathrm{s^{-1}})", step: 0.01})
+th0 = slider("theta0", 70, 5, 170, {label: "\theta_0\ (^\circ)", step: 1})
+g = 9.81
+
+// state (angle, angular speed); the equation of motion  θ'' = -(g/L) sin θ - γ θ'
+f(s, y) = (y.y, -g / L * sin(y.x) - gam * y.y)
+y0 = (rad(th0), 0)
+
+tex("\textbf{Damped pendulum}", (14, 138), {size: 15, anchor: "w"})
+tex("\ddot\theta = -\frac{g}{\ell}\sin\theta - \gamma\dot\theta", (14, 127), {size: 10.5, anchor: "w", color: "#444"})
+
+// the pendulum itself, at time t
+s = odeat(f, y0, t, {dt: 0.01})
+P = (52, 112)
+bob = P + 32 * L / 2 * (sin(s.x), -cos(s.x))
+line((36, 112), (68, 112), {width: 0.6})
+for k in 8 { line((37 + k * 4, 112), (35 + k * 4, 115), {width: 0.2}) }
+line(P, bob, {width: 0.35})
+arc(P, 8, -pi / 2, -pi / 2 + s.x, {color: "#d64545", width: 0.25})
+dot(bob, {r: 3.2, color: "#2b6cb0"})
+tex("\theta = " + fmt(deg(s.x), 1) + "^\circ", (52, 30), {size: 10})
+tex("t = " + fmt(t, 2) + "\,\mathrm{s}", (52, 22), {size: 9, color: "#666"})
+
+// angle against time, and the phase portrait
+ys = ode(f, y0, 12, {n: 600})
+A = frame2d((104, 80), (90, 44), (0, 12), (-3.2, 3.2), {xlabel: "t", ylabel: "\theta"})
+line(map(ys, (y, i) => A.map((i * 12 / 600, y.x))), {color: "#2b6cb0", width: 0.4})
+dot(A.map((t, s.x)), {r: 0.9, color: "#d64545"})
+B = frame2d((104, 14), (90, 52), (-3.2, 3.2), (-8, 8), {xlabel: "\theta", ylabel: "\dot\theta"})
+line(map(ys, y => B.map((y.x, y.y))), {color: "#8a4fd6", width: 0.35})
+dot(B.map((s.x, s.y)), {r: 0.9, color: "#d64545"})

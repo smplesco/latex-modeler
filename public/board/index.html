@@ -719,6 +719,7 @@
 
 <div id="selbar" class="chrome surface">
   <button class="b" id="modelBtn" data-tip="Make it 3D with LaTeX Modeler"><svg viewBox="0 0 24 24"><path d="M4 7.5 12 4l8 3.5v9L12 20l-8-3.5z"/><path d="M4 7.5 12 11l8-3.5M12 11v9"/></svg></button>
+  <button class="b" id="inkTexBtn" data-tip="Turn this handwriting into a typed equation"><svg viewBox="0 0 24 24"><path d="M4 17c2-6 4-9 5-8s-2 8 0 8 3-5 4-5-1 5 1 5"/><path d="M15 5h5M17.5 5v6"/></svg></button>
   <button class="b" id="graphBtn" data-tip="Graph this"><svg viewBox="0 0 24 24"><path d="M4 4v16h16"/><path d="M7 15c2.5-7 5-7 6-3s3.5 4 6-4"/></svg></button>
   <button class="b" id="editBtn" data-tip="Edit"><svg viewBox="0 0 24 24"><path d="M4 20l1-4L16.5 4.5a2.1 2.1 0 0 1 3 3L8 19z"/></svg></button>
   <i class="div" id="editDiv"></i>
@@ -2088,7 +2089,7 @@ function frame(){
   requestAnimationFrame(frame);
 }
 
-let selShown = false, editShown = null, graphShown = null, groupShown = '', modelShown = null;
+let selShown = false, editShown = null, graphShown = null, groupShown = '', modelShown = null, handShown = null;
 const graphableCache = new WeakMap();
 function selectionGraphLines(){
   if(S.selection.length!==1) return null;
@@ -2113,6 +2114,8 @@ function syncSelBar(){
   if(gs !== groupShown){ groupShown = gs; $('groupBtn').style.display = gs.includes('g') ? '' : 'none'; $('ungroupBtn').style.display = gs.includes('u') ? '' : 'none'; }
   const md = !drag && !!modelTexFor();
   if(md !== modelShown){ modelShown = md; $('modelBtn').style.display = md ? '' : 'none'; }
+  const hw = !drag && handStrokes().length > 0;
+  if(hw !== handShown){ handShown = hw; $('inkTexBtn').style.display = hw ? '' : 'none'; }
   const gr = !drag && !!selectionGraphLines();
   if(gr !== graphShown){ graphShown = gr; $('graphBtn').style.display = gr ? '' : 'none'; }
   if(show===selShown) return;
@@ -8248,6 +8251,67 @@ async function modelFromSelection(){
   await addModel({src:m.src, mode, fig:0, t:0, style:boardStyle(), name:m.title}, at, w);
 }
 $('modelBtn').onclick = ()=> modelFromSelection();
+
+/* ---- handwriting → equation (read on this device by LaTeX Modeler's recogniser) ---- */
+
+function handStrokes(){
+  const s = S.selection;
+  if(!s.length || s.length > 120 || !s.every(o=>o.type==='stroke' && o.tool!=='highlighter' && o.points && o.points.length)) return [];
+  return s;
+}
+async function handFromSelection(){
+  const list = handStrokes(); if(!list.length) return;
+  toast('Reading your handwriting…');
+  let L, tex = '';
+  try{ L = await lmHost(); tex = await L.handwriting(list.map(o=>o.points.map(p=>[p.x, p.y]))); }
+  catch(e){ toast("LaTeX Modeler couldn't be loaded. Check your connection and try again."); return; }
+  // let the person check and fix what was read before it replaces the ink
+  openDlg('Handwriting to equation', 'Use it', `<label class="fld"><span>This is what was read. Fix anything that's wrong, then press Use it.</span><input id="handIn" maxlength="600" autocomplete="off" spellcheck="false" style="font-family:ui-monospace,Consolas,monospace"></label><div id="handPrev" style="min-height:48px;margin-top:10px;display:flex;align-items:center;justify-content:center;overflow:auto"></div><p class="note">Your strokes are swapped for the equation. Undo brings them back.</p>`);
+  const inp = $('handIn'); inp.value = tex;
+  let tok = 0;
+  const show = async ()=>{ const my = ++tok, v = inp.value.trim(); const box = $('handPrev'); if(!box) return; if(!v){ box.textContent = ''; return; }
+    try{ const r = await texToSvg(v); if(my===tok && $('handPrev')){ box.innerHTML = r.svg; const el = box.firstElementChild; if(el){ el.style.maxWidth = '100%'; el.style.height = '44px'; el.style.width = 'auto'; el.style.color = 'var(--fg)'; } } }
+    catch(e){ if(my===tok && $('handPrev')) box.textContent = 'That LaTeX has a mistake in it.'; } };
+  inp.addEventListener('input', show); show();
+  setTimeout(()=>{ inp.focus(); inp.select(); }, 30);
+  inp.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); dlg.ok(); } });
+  if(!tex) toast("Nothing could be read there: type the equation in instead.");
+  dlg = {async ok(){
+    const v = inp.value.trim(); closeDlg0(); if(!v) return;
+    let r; try{ r = await texToSvg(v); }catch(e){ toast('That LaTeX has a mistake in it.'); return; }
+    const p = page(), live = list.filter(o=>p.objects.includes(o)); if(!live.length) return;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for(const o of live){ const b = bbox(o); x0 = Math.min(x0, b.x); y0 = Math.min(y0, b.y); x1 = Math.max(x1, b.x + b.w); y1 = Math.max(y1, b.y + b.h); }
+    // the same height as the writing (the equation is a little tidier, so it can be slightly smaller)
+    let h = Math.max(24/view().s, (y1 - y0)*0.85), w = h*r.vw/r.vh;
+    if(w > (x1 - x0)*1.6 && x1 > x0){ w = (x1 - x0)*1.2; h = w*r.vh/r.vw; }
+    const eq = {id:uid(), type:'equation', tool:'equation', tex:v, svg:r.svg, vw:r.vw, vh:r.vh, color:live[0].color || S.color, size:S.size,
+                x:(x0 + x1)/2 - w/2, y:(y0 + y1)/2 - h/2, w, h, rot:0};
+    pushUndo();
+    p.objects = p.objects.filter(o=>!live.includes(o)); p.objects.push(eq);
+    S.selection = [eq]; sceneDirty = true;
+    toast('Turned into an equation. Undo (Ctrl+Z) brings your handwriting back.');
+  }};
+}
+$('inkTexBtn').onclick = ()=> handFromSelection();
+
+/* ---- running inside a LaTeX Modeler tab ---- */
+const EMBED = new URLSearchParams(location.search).has('embed') && window.parent !== window && (()=>{ try{ return parent.location.origin===location.origin; }catch(e){ return false; } })();
+if(EMBED){
+  document.documentElement.classList.add('embedded');
+  const tell = m => { try{ parent.postMessage(Object.assign({type:'lm-board'}, m), location.origin); }catch(e){} };
+  let last = '';
+  setInterval(()=>{ const st = JSON.stringify([DOC.id, docName()]); if(st!==last){ last = st; tell({ev:'state', id:DOC.id, name:docName()}); } }, 700);
+  // the tab is closing: save to the library first (empty new boards aren't kept)
+  addEventListener('message', async e=>{
+    if(e.origin!==location.origin || e.source!==parent || !e.data || e.data.type!=='lm-board-save') return;
+    let ok = true;
+    try{ closeTextEditor(); if(DOC.id || hasWork()) await libSave(true); }catch(err){ ok = false; }
+    tell({ev:'saved', id:DOC.id, ok, nonce:String(e.data.nonce||'')});
+  });
+  // "LaTeX Modeler" links go back to the app's own start screen instead of loading it a second time inside the tab
+  for(const a of document.querySelectorAll('#lmMi, .hm-lm')) a.addEventListener('click', ev=>{ ev.preventDefault(); ev.stopPropagation(); tell({ev:'home'}); }, true);
+}
 
 /* ---- turning a model around live ---- */
 async function openModel(o){

@@ -12,9 +12,9 @@ export interface LibItem {
 
 export const FOLDERS: [string, string][] = [
   ['getting-started', 'Getting started'], ['surfaces', 'Surfaces'], ['curves-and-fields', 'Curves & fields'],
-  ['physics', 'Physics'], ['calculus', 'Calculus'], ['linear-algebra', 'Linear algebra'],
+  ['physics', 'Physics'], ['calculus', 'Calculus'], ['linear-algebra', 'Linear algebra'], ['interactive', 'Sliders & decks'],
 ];
-const TEMPLATE_ORDER = ['blank', 'notes', 'chalkboard', 'slides', 'blueprint', 'poster', 'worksheet', 'figure'];
+const TEMPLATE_ORDER = ['blank', 'notes', 'chalkboard', 'slides', 'deck', 'blueprint', 'poster', 'worksheet', 'figure'];
 
 /** "A4 · Lined · Desk" from a page("A4", "lined", {stage: "desk"}) line */
 export function formatOf(src: string): string {

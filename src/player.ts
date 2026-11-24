@@ -9,6 +9,7 @@ import { FigureChips } from './explore/chips';
 import { APP_URL, shareFragment } from './share';
 import { Ink, type Stroke } from './render/ink';
 import { joinInk } from './inkfile';
+import { ControlPanel } from './ui/controls';
 
 declare global { interface Window { __LATEX_MODELER_DOC?: { name: string; source: string; exported?: string; ink?: Stroke[] } } }
 
@@ -44,6 +45,7 @@ async function main() {
         <input type="range" id="bpSl" min="0" max="6" step="0.01" value="0"><span id="bpTv">t = 0.00</span></span>
       <button class="bb on" id="bpCam" title="Camera follows the page's animation">Camera</button>
       <button class="bb on" id="bpOrtho" title="Orthographic / perspective (O)">Ortho</button>
+      <span id="bpSl2" style="display:none"><button class="bb" id="bpPrev" title="Previous slide (←)">‹</button> <span id="bpSn"></span> <button class="bb" id="bpNext" title="Next slide (→)">›</button></span>
       <button class="bb" id="bpReset" title="Back to the flat page view (F)">Reset</button>
       <button class="bb on" id="bpInk" style="display:none" title="Show or hide the ink drawn on this page (I)">Ink</button>
       <button class="bb" id="bpExp" title="Open the first figure in the explorer (E)">Explore figures</button>
@@ -59,8 +61,10 @@ async function main() {
   await texReady();
   const viewer = new Viewer($('bpGl'));
   let t = 0, duration = 6, usesT = false, playing = false, follow = true, ctx: RunCtx | null = null, first = true;
+  const vals: Record<string, number> = {}; let slide = 0, nSlides = 0;
+  const controls = new ControlPanel($('bpView'));
   const explorer = new Explorer($('bpView'), {
-    source: () => doc.source, time: () => t, measure: measureTex, title: () => doc.name,
+    source: () => doc.source, time: () => t, measure: measureTex, title: () => doc.name, hooks: () => ({ sliders: vals, slide }),
     snapshot: (url, name) => { const a = document.createElement('a'); a.href = url; a.download = name; a.click(); },
   });
   const ink = new Ink(viewer);   // read-only here: never switched on, so it only draws the page's saved strokes
@@ -70,9 +74,12 @@ async function main() {
   const tour = () => ctx?.cam ?? (() => { const ph = duration > 0 ? t / duration : 0; return { yaw: 0.85 * Math.sin(2 * Math.PI * ph), pitch: 0.5 * Math.sin(Math.PI * ph), zoom: 1 + 0.3 * Math.sin(Math.PI * ph) }; })();
   const applyCam = () => { const c = tour(); viewer.place(c.yaw, c.pitch, c.zoom); };
   const compile = () => {
-    try { ctx = runProgram(doc.source, t, { measure: measureTex }); }
+    try { ctx = runProgram(doc.source, t, { measure: measureTex, sliders: vals, slide }); }
     catch (e: any) { $('bpErr').style.display = 'grid'; $('bpErr').textContent = 'This page has an error:\n' + e.message; return; }
-    viewer.build(ctx, []); ink.redraw(); chips.update(ctx);
+    nSlides = ctx.slides.length; if (nSlides) slide = Math.min(slide, nSlides - 1);
+    ink.slide = nSlides ? slide : undefined;
+    viewer.build(ctx, []); ink.redraw(); chips.update(ctx); controls.update(ctx.controls);
+    $('bpSl2').style.display = nSlides ? '' : 'none'; $('bpSn').textContent = `${slide + 1} / ${nSlides}`;
     usesT = ctx.usesT; duration = ctx.duration ?? 6;
     ($('bpSl') as HTMLInputElement).max = String(duration);
     $('bpT').style.display = usesT || ctx.cam ? 'flex' : 'none';
@@ -90,12 +97,16 @@ async function main() {
   $('bpCam').onclick = () => setFollow(!follow);
   $('bpOrtho').onclick = () => { viewer.setOrtho(!viewer.isOrtho); $('bpOrtho').classList.toggle('on', viewer.isOrtho); };
   $('bpReset').onclick = () => { setFollow(false); viewer.place(0, 0, 1); };
+  controls.onChange = (name, v) => { if (name === null) { for (const k in vals) delete vals[k]; } else vals[name] = v; compile(); };
+  const go = (k: number) => { if (!nSlides) return; k = Math.max(0, Math.min(nSlides - 1, k)); if (k === slide) return; slide = k; compile(); const c = ctx?.cam; if (c) { setFollow(true); applyCam(); } else { setFollow(false); viewer.place(0, 0, 1); } };
+  $('bpPrev').onclick = () => go(slide - 1); $('bpNext').onclick = () => go(slide + 1);
   $('bpInk').onclick = () => { viewer.ink.visible = !viewer.ink.visible; $('bpInk').classList.toggle('on', viewer.ink.visible); viewer.dirty = true; };
   $('bpExp').onclick = () => { const f = chips.first(); if (f) explorer.openTarget(f); };
   viewer.renderer.domElement.addEventListener('pointerdown', () => { if (follow && !playing) setFollow(false); });
   window.addEventListener('keydown', e => {
     if (explorer.isOpen || (e.target as HTMLElement).tagName === 'INPUT') return;
-    if (e.key === ' ') { e.preventDefault(); play(!playing); }
+    if (nSlides && ['ArrowRight', 'PageDown', 'ArrowLeft', 'PageUp'].includes(e.key)) { e.preventDefault(); go(slide + (e.key === 'ArrowRight' || e.key === 'PageDown' ? 1 : -1)); }
+    else if (e.key === ' ') { e.preventDefault(); play(!playing); }
     else if (e.key === 'f' || e.key === 'F') $('bpReset').click();
     else if (e.key === 'o' || e.key === 'O') $('bpOrtho').click();
     else if (e.key === 'e' || e.key === 'E') $('bpExp').click();

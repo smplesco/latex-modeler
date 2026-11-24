@@ -1,6 +1,7 @@
 // Built-in functions of the .bd language: math, transforms, document and marks.
 import { Vec, Mat, binop, isObj, typeName, show } from './values';
 import { plotBuiltins } from './plots';
+import { extraBuiltins } from './extras';
 
 import { PAGES, PAGE_STYLES, STAGES } from './pages';
 export { PAGES, PAGE_STYLES, STAGES };
@@ -56,7 +57,10 @@ export const fact = (n: number) => (Number.isInteger(n) && n >= 0 && n <= 170) ?
 
 export function makeBuiltins(ctx: any): Record<string, any> {
   // line: where the user wrote the call (outermost user-function call site); inner: the line that actually drew it
+  // on a deck, only the slide being shown draws (marks before the first slide() are on every slide)
+  const offSlide = () => ctx.slides && ctx.slides.length > 0 && ctx.slideNo >= 0 && ctx.slideNo !== (ctx.slideWant ?? 0);
   const add = (p: any, fig?: number) => {
+    if (offSlide()) return null;
     p.order = ctx.order++; p.inner = ctx.line; p.line = ctx.sites && ctx.sites.length ? ctx.sites[0] : ctx.line;
     p.fig = fig || 0; if (ctx.dyn) p.dyn = ctx.dyn;
     if (ctx.role) { p.role = ctx.role.role; p.frame = ctx.role.frame; }
@@ -150,7 +154,7 @@ export function makeBuiltins(ctx: any): Record<string, any> {
     },
     set: (o: any) => { if (!isObj(o)) throw new Error('set needs options like {color: "#333", width: 0.3, size: 11}'); Object.assign(ctx.defaults, o); return null; },
     duration: (s: any) => { ctx.duration = m.max(0.1, num(s, 'duration')); return null; },
-    view: (yaw = 0, pitch = 0, zoom = 1) => { ctx.cam = { yaw: num(yaw, 'yaw'), pitch: num(pitch, 'pitch'), zoom: num(zoom, 'zoom') }; return null; },
+    view: (yaw = 0, pitch = 0, zoom = 1) => { if (offSlide()) return null; ctx.cam = { yaw: num(yaw, 'yaw'), pitch: num(pitch, 'pitch'), zoom: num(zoom, 'zoom') }; return null; },
     // ---- marks
     line: (...a: any[]) => {
       const [r, o] = splitArgs(a); const pts = collectPts(r, 'line'); if (pts.length < 2) throw new Error('line needs at least two points');
@@ -231,5 +235,6 @@ export function makeBuiltins(ctx: any): Record<string, any> {
   };
   B.arrowh = B.arrow; B.polyline = B.line; B.path = B.line;
   Object.assign(B, plotBuiltins(ctx, add, ink, W, B));
+  Object.assign(B, extraBuiltins(ctx, add, ink, W, B));
   return B;
 }

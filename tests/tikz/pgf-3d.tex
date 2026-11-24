@@ -1,0 +1,5 @@
+\begin{tikzpicture}
+\begin{axis}[view={60}{30}, xlabel=$x$, ylabel=$y$, zlabel=$z$]
+  \addplot3[surf, domain=-2:2, y domain=-2:2, samples=30] {exp(-x^2-y^2)};
+\end{axis}
+\end{tikzpicture}
