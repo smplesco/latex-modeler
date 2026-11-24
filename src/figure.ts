@@ -8,6 +8,8 @@ import { texReady, measureTex } from './render/tex';
 import { explorerScene } from './explore/explorer';
 import { shareFragment } from './share';
 import { TEMPLATES, EXAMPLES } from './library';
+import { registerOffline } from './offline';
+registerOffline();   // so boards can draw figures offline too
 
 /** what a board keeps for a model object */
 export interface ModelSpec {

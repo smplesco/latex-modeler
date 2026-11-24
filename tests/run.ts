@@ -5,6 +5,7 @@ import { parseLatex } from '../src/model/latex';
 import { compile, tryDiff, freeSyms } from '../src/model/sym';
 import { runProgram } from '../src/lang/interp';
 import { readFileSync, readdirSync } from 'node:fs';
+import { joinInk, splitInk } from '../src/inkfile';
 
 const EXTRA = [
   'y = x^2', 'y = \\tan x', 'y = \\ln x', 'y = \\sqrt{x}', 'y = e^x', 'y = \\frac{1}{x}', 'y = |x - 1| + |x + 1|', 'y = \\lfloor x \\rfloor',
@@ -98,6 +99,21 @@ for (const f of [...walk('src/examples'), ...walk('src/templates')]) {
     console.log(`✓ example   ${String(marks).padStart(5)} marks  ${f.replace('src/', '')}`);
   }
   catch (e: any) { fail++; console.log(`✗ example ${f}: line ${e.line}: ${e.message}`); }
+}
+// ink rides along as a trailing comment line: the page still runs, and it comes back exactly
+{
+  const check = (name: string, ok: boolean) => { n++; if (!ok) { fail++; console.log('✗ ink       ' + name); } else console.log('✓ ink       ' + name); };
+  const code = 'page("A4")\ntex("x^2", (105, 200))\n';
+  const ink = [{ tool: 'pen' as const, color: '#e5484d', w: 0.6, pts: [10, 20, NaN, 30.125, 40, 5] }, { tool: 'hl' as const, color: '#ffd400', w: 4.5, pts: [1, 2, NaN] }];
+  const file = joinInk(code, ink), back = splitInk(file);
+  check('round trip keeps the code', back.code === code);
+  check('round trip keeps the strokes', back.ink?.length === 2 && Number.isNaN(back.ink[0].pts[2]) && back.ink[0].pts[3] === 30.13 && back.ink[1].tool === 'hl');
+  check('a file with ink still runs', runProgram(file, 0, { measure: () => 10 }).prims.length === runProgram(code, 0, { measure: () => 10 }).prims.length);
+  check('no ink: the file is just the code', joinInk(code, []) === code && splitInk(code).code === code && !splitInk(code).ink);
+  check('code without a trailing newline', splitInk(joinInk('page("A4")', ink)).code === 'page("A4")\n');
+  check('an ink line in the middle is just a comment', splitInk('//@ink []\npage("A4")\n').code === '//@ink []\npage("A4")\n');
+  check('broken ink is left as code', splitInk(code + '//@ink [{oops\n').code === code + '//@ink [{oops\n');
+  check('bad strokes are dropped', !splitInk(code + '//@ink [{"tool":"pen","color":"red;x","w":1,"pts":[1,2,3]},{"tool":"pen","color":"#000","w":1,"pts":[1,2]}]\n').ink);
 }
 console.log('\nkinds:', kinds);
 console.log(`${n - fail}/${n} passed`);

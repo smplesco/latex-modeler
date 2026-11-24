@@ -38,6 +38,8 @@ export function tauriPlatform(): Platform {
       try {
         const p = await invoke<string | null>('opened_file');
         if (!p) return null;
+        // a board file isn't read here: board mode asks for it itself (it can be large)
+        if (/\.screenboard$/i.test(p)) return { name: base(p), path: p, text: '', board: true };
         return { name: base(p), path: p, text: await readTextFile(p) };
       } catch { return null; }
     },

@@ -82,7 +82,16 @@ Things I especially want to hear about:
 - **Exports** (HTML, video, images, 3D models) are made on your device and
   downloaded. Nothing is uploaded.
 - **Ink** (pen, highlighter) you draw on a page is kept with that page in this
-  browser's storage. It isn't written into the page's code or its `.bd` file.
+  browser's storage, and goes wherever the page goes: its `.bd` file, share link,
+  interactive HTML export and SVG export. In a file it is one last comment line
+  (`//@ink` followed by a list of strokes). Reading it back only accepts known
+  fields, plain `#rrggbb` colours and numbers within limits; anything else is
+  dropped, and the line can never run as code.
+- **Working offline.** After one visit the browser keeps a copy of the app's own
+  files (a service worker, `sw.js`) so pages open without a connection. It only
+  stores files from this site, never pages from other sites or anything you type.
+  Board mode keeps its own copy the same way (`board/sw.js`). Neither is used in
+  the desktop app.
 - **Live recording** captures only the 3D viewer, plus your microphone if you tick
   "mic" (the browser asks first). The video is made on your device and downloaded.
 
@@ -137,6 +146,9 @@ Things I especially want to hear about:
   `.screenboard` files in that folder only. If the folder is inside a sync
   service such as OneDrive or Google Drive, that service copies the files under
   its own terms. Board mode itself still sends nothing.
+- **Desktop app.** Double-clicking a `.screenboard` file opens it in board mode.
+  Board mode asks the app for the file it was opened with, and that is the only
+  file it can read this way; it can't name a path of its own.
 - **Sharing to board mode.** On Android, a picture or PDF shared to the
   installed app is held in the browser's cache on your device until the app
   opens it, then removed.

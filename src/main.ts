@@ -14,10 +14,13 @@ import { PAGES, PAGE_STYLES, STAGES } from './lang/pages';
 import { Home } from './ui/home';
 import { Thumbs } from './ui/thumbs';
 import { Ink, type Stroke } from './render/ink';
+import { registerOffline } from './offline';
+registerOffline();
 import type { ModelResult } from './model/generate';
 import { getPlatform, Platform } from './platform';
 import { REFERENCE } from './ui/reference';
 import { shareLink, readShare } from './share';
+import { joinInk, splitInk, inkSVG } from './inkfile';
 import { record, supportedFormats, type RecFormat } from './render/record';
 import type { Explorer } from './explore/explorer';
 import { FigureChips, type ExploreTarget } from './explore/chips';
@@ -27,7 +30,7 @@ const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replac
 
 // ------------------------------------------------------------------ documents
 // example docs remember which library page they came from (src), so they can be reverted and stay clean until edited
-interface Doc { id: string; name: string; text: string; saved: string; path?: string; example?: boolean; src?: string; ink?: Stroke[] }
+interface Doc { id: string; name: string; text: string; saved: string; path?: string; example?: boolean; src?: string; ink?: Stroke[]; inkSaved?: string }
 const STORE = 'lm.session.v3', OLD_STORE = 'bdraw.session.v2';
 let docs: Doc[] = [], current = '';          // current = '' → the start screen
 const original = (d: Doc) => (d.example ? byKey(d.src)?.src : undefined);
@@ -40,6 +43,7 @@ function loadSession() {
   } catch { /* ignore */ }
   for (const d of saved) {
     if (!d || typeof d.text !== 'string' || typeof d.name !== 'string') continue;
+    if (typeof d.inkSaved !== 'string') delete d.inkSaved;
     if (d.example) {
       // older versions kept every example open by name; now examples open only when asked, from their folder
       d.src ??= LIBRARY.find(e => e.file === d.name)?.key;
@@ -54,7 +58,13 @@ function loadSession() {
 let saveTimer = 0;
 function persist() { clearTimeout(saveTimer); saveTimer = window.setTimeout(() => { try { localStorage.setItem(STORE, JSON.stringify({ docs, current })); } catch { /* ignore */ } }, 300); }
 const doc = (): Doc | undefined => docs.find(d => d.id === current);
-const isDirty = (d: Doc) => (d.example ? d.text !== original(d) : d.text !== d.saved);
+const inkKey = (d: Doc) => (d.ink?.length ? JSON.stringify(d.ink) : '');
+const isDirty = (d: Doc) => (d.example ? d.text !== original(d) || !!d.ink?.length : d.text !== d.saved || inkKey(d) !== (d.inkSaved ?? ''));
+/** a doc from a file's text: the ink line (if any) comes off the code and becomes the page's ink */
+function fileDoc(name: string, text: string, path?: string) {
+  const { code, ink } = splitInk(text);
+  return { name, text: code, path, extra: ink ? { ink, inkSaved: JSON.stringify(ink) } : {} };
+}
 const slug = (name: string) => name.replace(/\.bd$/, '').replace(/[^A-Za-z0-9-]/g, '-');
 
 // ------------------------------------------------------------------ UI objects
@@ -161,15 +171,16 @@ async function closeDoc(d: Doc) {
 async function saveDoc(d = doc(), saveAs = false): Promise<boolean> {
   if (!d) { toast('open a page first'); return false; }
   try {
-    const r = await platform.saveFile(d.name, d.text, d.example ? undefined : d.path, saveAs || !!d.example);
+    const r = await platform.saveFile(d.name, joinInk(d.text, d.ink), d.example ? undefined : d.path, saveAs || !!d.example);
     if (!r) return false;
     if (d.example) {   // an example is never overwritten: the saved file becomes its own page and the example goes back to normal
       const text = d.text; d.text = original(d) ?? d.text;
-      const i = docs.indexOf(d); const nd: Doc = { id: 'd' + Date.now().toString(36), name: r.name, text, saved: text, path: r.path };
+      const i = docs.indexOf(d); const nd: Doc = { id: 'd' + Date.now().toString(36), name: r.name, text, saved: text, path: r.path, ink: d.ink, inkSaved: d.ink?.length ? JSON.stringify(d.ink) : undefined };
+      d.ink = undefined;   // the ink went with the saved copy
       docs.splice(i + 1, 0, nd); if (current === d.id) openDoc(nd.id);
-      if (d.text === original(d) && i >= 0) docs.splice(i, 1);   // the untouched example tab isn't needed any more
+      if (d.text === original(d) && i >= 0) docs.splice(docs.indexOf(d), 1);   // the untouched example tab isn't needed any more
     }
-    else { d.name = r.name; d.path = r.path; d.saved = d.text; }
+    else { d.name = r.name; d.path = r.path; d.saved = d.text; d.inkSaved = inkKey(d) || undefined; }
     updateTabs(); persist(); toast(platform.kind === 'desktop' ? `saved ${r.path ?? r.name}` : `downloaded ${r.name}`);
     return true;
   } catch (e: any) { toast('save failed: ' + (e.message || e)); return false; }
@@ -430,7 +441,7 @@ async function modelIt() {
 // ------------------------------------------------------------------ files & export
 $('bNew').onclick = () => { showHome(); requestAnimationFrame(() => home.scrollToTemplates()); };
 $('bOpen').onclick = async () => {
-  try { const f = await platform.openFile(); if (!f) return; const ex = docs.find(d => d.path && d.path === f.path); if (ex) { openDoc(ex.id); return; } addDoc(f.name, f.text, f.path); }
+  try { const f = await platform.openFile(); if (!f) return; const ex = docs.find(d => d.path && d.path === f.path); if (ex) { openDoc(ex.id); return; } const fd = fileDoc(f.name, f.text, f.path); addDoc(fd.name, fd.text, fd.path, fd.text, fd.extra); }
   catch (e: any) { toast('open failed: ' + (e.message || e)); }
 };
 $('bSave').onclick = (e) => saveDoc(doc(), (e as MouseEvent).shiftKey);
@@ -455,7 +466,7 @@ async function doExport(kind: string) {
   if (kind === 'code') { try { await navigator.clipboard.writeText(editor.value); toast('page code copied'); } catch { toast('copy was blocked — select the code and press Ctrl+C'); } return; }
   let name: string, data: string | Uint8Array, mime: string, previewUrl: string;
   if (kind === 'svg') {
-    const svg = exportSVG(lastCtx); name = baseName() + '.svg'; data = svg; mime = 'image/svg+xml';
+    const svg = exportSVG(lastCtx, inkSVG(doc()?.ink, lastCtx.page.h)); name = baseName() + '.svg'; data = svg; mime = 'image/svg+xml';
     previewUrl = URL.createObjectURL(new Blob([svg], { type: mime }));
   } else {
     const url = kind === 'png' ? viewer.snapshotPage(200) : viewer.snapshotView();
@@ -509,12 +520,13 @@ async function collectLabelsNow(source: string): Promise<{ tex: Record<string, s
   return { tex, complete };
 }
 // one self-contained .html: the player bundle + this page's code; MathJax in full, or (compact) just the labels it uses
-async function buildStandaloneHTML(name: string, source: string, mode: 'full' | 'compact' = 'full'): Promise<string> {
+async function buildStandaloneHTML(name: string, source: string, mode: 'full' | 'compact' = 'full', ink?: Stroke[]): Promise<string> {
   const get = async (u: string) => { const r = await fetch(u); if (!r.ok) throw new Error(`${u}: ${r.status}`); return r.text(); };
   const [player, mathjax] = await Promise.all([get('./player/player.js'), mode === 'full' ? get('./vendor/tex-svg-full.js') : Promise.resolve('')]);
   const safe = (js: string) => js.replace(/<\/(script)/gi, '<\\/$1').replace(/<!--/g, '<\\!--');
   const json = (o: any) => JSON.stringify(o).replace(/</g, '\\u003c');
-  const doc = json({ name, source, exported: new Date().toISOString().slice(0, 10) });
+  const strokes = ink ? JSON.parse(joinInk('', ink).slice(7)) : undefined;   // NaN → null, numbers rounded
+  const doc = json({ name, source, ink: strokes, exported: new Date().toISOString().slice(0, 10) });
   const labels = mode === 'compact' ? (await collectLabels(source)).tex : null;
   return `<!DOCTYPE html>
 <html lang="en">
@@ -539,8 +551,8 @@ async function exportHTML() {
   toast('building the interactive page…');
   let full: string, compact: string, complete = true;
   try {
-    full = await buildStandaloneHTML(docName(), editor.value, 'full');
-    compact = await buildStandaloneHTML(docName(), editor.value, 'compact');
+    full = await buildStandaloneHTML(docName(), editor.value, 'full', doc()?.ink);
+    compact = await buildStandaloneHTML(docName(), editor.value, 'compact', doc()?.ink);
     complete = (await collectLabels(editor.value)).complete;
   } catch (e: any) { toast('HTML export failed: ' + (e.message || e)); return; }
   const mb = (s: string) => (s.length / 1048576).toFixed(s.length < 1048576 ? 2 : 1);
@@ -625,7 +637,7 @@ function exportVideo() {
 // ---- share links: the page's code travels inside the link itself
 async function exportShare() {
   let url: string;
-  try { url = await shareLink(docName(), editor.value); } catch (e: any) { toast('could not make a link: ' + (e.message || e)); return; }
+  try { url = await shareLink(docName(), joinInk(editor.value, doc()?.ink)); } catch (e: any) { toast('could not make a link: ' + (e.message || e)); return; }
   let copied = false; try { await navigator.clipboard.writeText(url); copied = true; } catch { /* blocked: the dialog lets them copy */ }
   const long = url.length > 8000;
   modal(`<h3>Share link</h3><p style="margin:4px 0 10px;line-height:1.5">${copied ? '<b>Copied.</b> ' : ''}Anyone who opens this link sees this page live in LaTeX Modeler and can orbit, explore and edit their own copy.
@@ -642,8 +654,9 @@ async function openShared(hash: string): Promise<boolean> {
   let sh: { name: string; source: string } | null = null;
   try { sh = await readShare(hash); } catch (e: any) { toast('this share link is damaged: ' + (e.message || e)); return false; }
   if (!sh) return false;
-  const same = docs.find(d => d.text === sh!.source);
-  if (same) openDoc(same.id); else addDoc(sh.name, sh.source, undefined, sh.source);
+  const fd = fileDoc(sh.name, sh.source), key = fd.extra.inkSaved ?? '';
+  const same = docs.find(d => d.text === fd.text && inkKey(d) === key);
+  if (same) openDoc(same.id); else addDoc(fd.name, fd.text, undefined, fd.text, fd.extra.ink ? { ink: fd.extra.ink } : {});
   flashStatus('opened a shared page'); toast(`opened shared page “${docName()}” — it's your own copy now`);
   return true;
 }
@@ -693,7 +706,8 @@ split.addEventListener('pointerdown', e => {
 
 // ------------------------------------------------------------------ ink, laser and live recording
 const inkBar = $('inkBar');
-ink.onChange = () => { const d = doc(); if (!d) return; d.ink = ink.strokes.length ? ink.strokes.map(s => ({ ...s, pts: s.pts.map(v => +v.toFixed(2)) })) : undefined; persist(); };
+if (matchMedia('(pointer: coarse)').matches) inkBar.querySelector('.inote')!.textContent = 'one finger draws · two fingers turn and zoom';
+ink.onChange = () => { const d = doc(); if (!d) return; d.ink = ink.strokes.length ? ink.strokes.map(s => ({ ...s, pts: s.pts.map(v => +v.toFixed(2)) })) : undefined; persist(); updateTabs(); };
 function setInk(on: boolean) {
   if (on && !current) return;
   ink.setOn(on); inkBar.classList.toggle('show', on); $('bInk').classList.toggle('on', on); $('gl').classList.toggle('inking', on);
@@ -782,10 +796,13 @@ async function boot() {
   $('loading').remove();
   loadSession();
   // what to show first: a file the desktop app was opened with, a share link, a link to a page — otherwise the start screen
-  const init = await platform.initialFile();
+  // the file the desktop app was launched with is handled once: coming back from board mode doesn't open it again
+  let launched = false; try { launched = sessionStorage.getItem('lm-launch-done') === '1'; sessionStorage.setItem('lm-launch-done', '1'); } catch { /* ignore */ }
+  const init = launched ? null : await platform.initialFile();
+  if (init?.board) { location.replace('./board/?openfile=1'); return; }   // a .screenboard file opens in board mode
   let target = '';
   const shareHash = /^#s=/.test(location.hash) ? location.hash : '';
-  if (init) { const ex = docs.find(d => d.path === init.path); if (ex) target = ex.id; else { const d: Doc = { id: 'f' + Date.now(), name: init.name, text: init.text, saved: init.text, path: init.path }; docs.push(d); target = d.id; } }
+  if (init) { const ex = docs.find(d => d.path === init.path); if (ex) target = ex.id; else { const fd = fileDoc(init.name, init.text, init.path); const d: Doc = { id: 'f' + Date.now(), name: fd.name, text: fd.text, saved: fd.text, path: fd.path, ...fd.extra }; docs.push(d); target = d.id; } }
   else if (!shareHash) {
     let h = ''; try { h = decodeURIComponent(location.hash.slice(1)); } catch { /* ignore */ }
     if (h) {
@@ -799,6 +816,6 @@ async function boot() {
   if (target) openDoc(target);
   else if (!current && !(shareHash && await openShared(shareHash))) showHome();
   requestAnimationFrame(frame);
-  (window as any).__bdraw = { get explorer() { return explorer; }, openExplore, chips, compile, setTime, viewer, get autoModel() { return modeller?.autoModel; }, modelIt, get problems() { return problems; }, get ctx() { return lastCtx; }, exportSVG: () => lastCtx && exportSVG(lastCtx), openDoc, docs: () => docs, load: (c: string) => addDoc('test.bd', c, undefined, c), showHome, home, thumbs, openExample };
+  (window as any).__bdraw = { get explorer() { return explorer; }, openExplore, chips, compile, setTime, viewer, get autoModel() { return modeller?.autoModel; }, modelIt, get problems() { return problems; }, get ctx() { return lastCtx; }, exportSVG: () => lastCtx && exportSVG(lastCtx), openDoc, docs: () => docs, editor, load: (c: string) => addDoc('test.bd', c, undefined, c), showHome, home, thumbs, openExample };
 }
 boot().catch(e => { const l = $('loading'); if (l) l.innerHTML = `<div style="color:#f88;padding:20px">Failed to start: ${esc(String(e?.message || e))}</div>`; console.error(e); });

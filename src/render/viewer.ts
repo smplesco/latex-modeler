@@ -389,7 +389,7 @@ export class Viewer {
       }
       const pad = stage.frame ? 2 * stage.pad : 0;
       const shadow = new THREE.Mesh(D(new THREE.PlaneGeometry((w + pad) * 1.22, (h + pad) * 1.16)), D(new THREE.MeshBasicMaterial({ map: this.shadowTex, transparent: true, depthWrite: false, opacity: stage.surface ? 0.85 : 1 })));
-      shadow.position.set(w / 2 + 2, h / 2 - 3, pageZ - thick - 3); this.content.add(shadow);
+      shadow.position.set(w / 2 + 2, h / 2 - 3, pageZ - thick - 3); shadow.userData.paper = true; this.content.add(shadow);   // ink beside the sheet goes on the paper's plane, not down on its shadow
     } else if (stage.sheet === 'flat') {
       const p = new THREE.Mesh(D(new THREE.PlaneGeometry(w, h)), basic(bg)); p.position.set(w / 2, h / 2, pageZ); p.userData.paper = true; this.content.add(p);
     }

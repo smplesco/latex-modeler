@@ -48,6 +48,15 @@
         "description": "LaTeX Modeler page script",
         "role": "Editor",
         "mimeType": "text/plain"
+      },
+      {
+        "ext": [
+          "screenboard"
+        ],
+        "name": "Screenboard board",
+        "description": "Boards for LaTeX Modeler's board mode",
+        "role": "Editor",
+        "mimeType": "application/json"
       }
     ],
     "windows": {
@@ -55,6 +64,6 @@
         "type": "downloadBootstrapper"
       }
     },
-    "copyright": "\u00a9 2026 smplesco. All rights reserved."
+    "copyright": "© 2026 smplesco. All rights reserved."
   }
 }

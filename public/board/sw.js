@@ -1,8 +1,11 @@
 /* Bump CACHE when you change index.html, or visitors keep the old copy. */
-const CACHE = 'board-v1';   // Screenboard's cache inside LaTeX Modeler (was screenboard-v16 on its old site)
+const CACHE = 'board-v3';   // Screenboard's cache inside LaTeX Modeler (was screenboard-v16 on its old site)
 const SHARED = 'screenboard-shared';   // files shared to Screenboard from another app wait here for the page
 const ASSETS = ['./', './index.html', './manifest.webmanifest',
-                './icon-192.png', './icon-512.png', './icon-maskable.png'];
+                './icon-192.png', './icon-512.png', './icon-maskable.png',
+                // the libraries ship with the app, so keep them too: equations, PDF and ZIP then work offline
+                './lib/mathjax/tex-svg.js', './lib/jspdf.umd.min.js', './lib/jszip.min.js',
+                './lib/pdfjs/pdf.min.js', './lib/pdfjs/pdf.worker.min.js', './lib/peerjs.min.js'];
 
 self.addEventListener('install', e=>{
   e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS)).then(()=>self.skipWaiting()));
@@ -10,7 +13,8 @@ self.addEventListener('install', e=>{
 self.addEventListener('activate', e=>{
   e.waitUntil(
     caches.keys()
-      .then(keys=>Promise.all(keys.filter(k=>k!==CACHE && k!==SHARED).map(k=>caches.delete(k))))
+      // only this board's own old caches: the site's other caches (LaTeX Modeler's, lm-*) belong to it
+      .then(keys=>Promise.all(keys.filter(k=>/^(board|screenboard)-/.test(k) && k!==CACHE && k!==SHARED).map(k=>caches.delete(k))))
       .then(()=>self.clients.claim())
   );
 });

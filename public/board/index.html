@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob: mediastream:; font-src 'self' data:; connect-src 'self' https://0.peerjs.com wss://0.peerjs.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob: mediastream:; font-src 'self' data:; connect-src 'self' https://0.peerjs.com wss://0.peerjs.com ipc: http://ipc.localhost; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>Screenboard</title>
 <meta name="description" content="A chalkboard and whiteboard for drawing diagrams and explaining things on a call.">
@@ -544,6 +544,9 @@
   #lmBar{position:fixed;z-index:31;display:none;align-items:center;gap:6px;padding:6px 6px 6px 12px;border-radius:12px;font-size:12.5px}
   #lmBar.show{display:flex}
   #lmBar .lm-t{color:var(--fg-dim);margin-right:4px;white-space:nowrap}
+  #lmBar .tg,#lmBar .btn{white-space:nowrap}
+  #lmBar{max-width:calc(100vw - 16px);box-sizing:border-box}
+  @media (max-width:560px){ #lmBar .lm-t{display:none} #lmBar{padding-left:6px} }
   #lmFrame.live{box-shadow:0 0 0 2px #36b4ff;border-radius:4px}
   #lmPick{position:fixed;inset:0;z-index:33;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.45)}
   #lmPick.show{display:flex}
@@ -4295,6 +4298,17 @@ function recDraw(){
   recCtx.fillStyle = th.bg; recCtx.fillRect(0,0,recCv.width,recCv.height);
   const k = Math.min(recCv.width/cv.width, recCv.height/cv.height), w = cv.width*k, h = cv.height*k;
   recCtx.drawImage(cv, (recCv.width-w)/2, (recCv.height-h)/2, w, h);
+  // a LaTeX Modeler figure being turned live sits in its own frame above the board: film it too, in place
+  if(LMF.live && LMF.frame){
+    try{
+      const g = LMF.frame.contentDocument && LMF.frame.contentDocument.querySelector('#gl canvas');
+      if(g && g.width){
+        const cr = cv.getBoundingClientRect(), fr = LMF.frame.getBoundingClientRect(), sx = cv.width/cr.width, sy = cv.height/cr.height;
+        const x = (recCv.width-w)/2 + (fr.left - cr.left)*sx*k, y = (recCv.height-h)/2 + (fr.top - cr.top)*sy*k;
+        recCtx.drawImage(g, x, y, fr.width*sx*k, fr.height*sy*k);
+      }
+    }catch(e){}
+  }
 }
 function recTick(){
   if(!REC || !REC.rec) return;
@@ -6098,7 +6112,7 @@ syncPages(); syncHistoryButtons(); updateZoomLabel();
 requestAnimationFrame(frame);
 setTimeout(()=>{ const h=$('hint'); if(h){ h.style.opacity='0'; setTimeout(()=>h.remove(),600); } }, 9000);
 /* works offline once loaded, and installs as an app from the browser menu */
-if('serviceWorker' in navigator && location.protocol.startsWith('http')){
+if('serviceWorker' in navigator && location.protocol.startsWith('http') && !('__TAURI_INTERNALS__' in window)){   // the desktop app has every file already
   window.addEventListener('load', ()=> navigator.serviceWorker.register('sw.js').catch(()=>{}));
 }
 
@@ -8225,8 +8239,13 @@ async function modelFromSelection(){
   let L, m; try{ L = await lmHost(); m = await L.model(tex); }catch(e){ toast("LaTeX Modeler couldn't be loaded. Check your connection and try again."); return; }
   if(!m.ok){ toast(m.error); return; }
   const info = L.inspect(m.src), b = bbox(from), v = view();
-  const w = Math.max(b.w*1.25, 420/v.s);
-  await addModel({src:m.src, mode:info.frames.length ? 'figure' : 'page', fig:0, t:0, style:boardStyle(), name:m.title}, {x:b.x + b.w + 30/v.s, y:b.y + b.h/2}, w);
+  const mode = info.frames.length ? 'figure' : 'page', aspect = mode==='page' ? 0.72 : 4/3;
+  // next to the selection if it fits on screen, otherwise underneath it (phones, or a selection near the edge)
+  const gap = 30/v.s, left = S2W(16, 0).x, right = S2W(innerWidth - 16, 0).x;
+  let w = Math.min(Math.max(b.w*1.25, 420/v.s), right - left), at;
+  if(b.x + b.w + gap + w <= right) at = {x:b.x + b.w + gap, y:b.y + b.h/2};
+  else { const h = w/aspect, x = Math.min(Math.max(left, b.x + b.w/2 - w/2), right - w); at = {x, y:b.y + b.h + gap + (mode==='page' ? 0 : h/2)}; }
+  await addModel({src:m.src, mode, fig:0, t:0, style:boardStyle(), name:m.title}, at, w);
 }
 $('modelBtn').onclick = ()=> modelFromSelection();
 
@@ -8243,7 +8262,7 @@ async function openModel(o){
   const r = L.show(spec); if(!r.ok){ toast(r.error); lmPark(); return; }
   LMF.live = o; LMF.t = spec.t || 0; LMF.playing = false; sceneDirty = true;
   L.live(true);
-  $('lmTitle').textContent = (o.model.name ? o.model.name + ' · ' : '') + 'drag to turn, scroll to zoom';
+  $('lmTitle').textContent = (o.model.name ? o.model.name + ' · ' : '') + (matchMedia('(pointer: coarse)').matches ? 'drag to turn, pinch to zoom' : 'drag to turn, scroll to zoom');
   $('lmPlay').hidden = !L.usesTime(); $('lmPlay').textContent = 'Play';
   const bar = $('lmBar'); bar.classList.add('show');
   const bw = bar.offsetWidth, bh = bar.offsetHeight;
@@ -9592,6 +9611,16 @@ const cleanUrl = ()=>{ try{ history.replaceState(null, '', location.pathname + l
   const q = new URLSearchParams(location.search), returning = !!localStorage.getItem('sb-prefs') || LIBR.list.length > 0;
   if(lsGet('sb-news')!==NEWS_ID){ lsSet('sb-news', NEWS_ID); if(returning && !/^#live=/.test(location.hash)) showNews(); }
   if(q.has('shared')){ cleanUrl(); takeShared(); return; }
+  // ?openfile=1: the desktop app was opened with a .screenboard file (double-clicked in Explorer)
+  if(q.has('openfile')){
+    cleanUrl();
+    const T = window.__TAURI_INTERNALS__; let f = null;
+    try{ if(T && T.invoke) f = await T.invoke('opened_board'); }catch(e){ f = null; }
+    if(!f){ toast("That board file couldn't be read."); return; }
+    let d = null;
+    try{ d = JSON.parse(f[1]); if(!d || !Array.isArray(d.pages)) throw 0; }catch(err){ toast("That file wasn't a saved board."); return; }
+    LAUNCHED = true; hideHome(); openBoardFile(d, String(f[0])); return;
+  }
   if(q.get('new')){ if(THEMES[q.get('new')]){ setTheme(q.get('new')); syncSurfacePop(); } cleanUrl(); return; }
   const home = q.get('do')==='home'; if(q.has('do')) cleanUrl();
   // ?open=<id>: a board picked from LaTeX Modeler's start screen

@@ -230,4 +230,12 @@ a.card{text-decoration:none;color:inherit}
 #inkBar .mic{color:#aaa;display:flex;align-items:center;gap:3px;cursor:pointer}
 #inkBar .rtime{color:#ff8a8a;font-variant-numeric:tabular-nums;min-width:0}
 #inkBar .inote{flex-basis:100%;color:#8a8f96;font-size:11px;text-align:center;margin-top:1px}
+/* phones and narrow viewers: one scrolling row at the top, so the bar doesn't cover the page you're drawing on */
+@media (max-width:700px){
+  #inkBar{flex-wrap:nowrap;overflow-x:auto;top:6px;max-width:calc(100% - 12px);padding:5px 6px;scrollbar-width:none}
+  #inkBar::-webkit-scrollbar{display:none}
+  #inkBar .ik,#inkBar .mic{flex:none;white-space:nowrap}
+  #inkBar .sw{flex:none}
+  #inkBar .inote{display:none}
+}
 #gl.inking #hint,#gl.inking #pickTip{display:none}

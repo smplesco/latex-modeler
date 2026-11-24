@@ -1,5 +1,5 @@
 // The only part of the app that differs between the browser and the desktop (Tauri) build.
-export interface OpenedFile { name: string; path?: string; text: string }
+export interface OpenedFile { name: string; path?: string; text: string; /** a .screenboard file: board mode opens it */ board?: boolean }
 export interface Platform {
   kind: 'web' | 'desktop';
   /** let the user pick a .bd file */

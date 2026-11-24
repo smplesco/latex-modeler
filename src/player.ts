@@ -7,8 +7,10 @@ import { texReady, measureTex, onTexUpgrade } from './render/tex';
 import { Explorer } from './explore/explorer';
 import { FigureChips } from './explore/chips';
 import { APP_URL, shareFragment } from './share';
+import { Ink, type Stroke } from './render/ink';
+import { joinInk } from './inkfile';
 
-declare global { interface Window { __LATEX_MODELER_DOC?: { name: string; source: string; exported?: string } } }
+declare global { interface Window { __LATEX_MODELER_DOC?: { name: string; source: string; exported?: string; ink?: Stroke[] } } }
 
 const CSS = `
 html,body{margin:0;height:100%;background:#202124;color:#d7dde4;font:13px Inter,system-ui,'Segoe UI',sans-serif;overflow:hidden}
@@ -43,6 +45,7 @@ async function main() {
       <button class="bb on" id="bpCam" title="Camera follows the page's animation">Camera</button>
       <button class="bb on" id="bpOrtho" title="Orthographic / perspective (O)">Ortho</button>
       <button class="bb" id="bpReset" title="Back to the flat page view (F)">Reset</button>
+      <button class="bb on" id="bpInk" style="display:none" title="Show or hide the ink drawn on this page (I)">Ink</button>
       <button class="bb" id="bpExp" title="Open the first figure in the explorer (E)">Explore figures</button>
       <a class="bb" id="bpOpen" target="_blank" rel="noopener" style="display:none;text-decoration:none" title="Open a copy of this page in the LaTeX Modeler editor">Open in LaTeX Modeler ↗</a>
       <span class="sp"></span><small>made with LaTeX Modeler${doc.exported ? ' · ' + doc.exported : ''}</small>
@@ -60,13 +63,16 @@ async function main() {
     source: () => doc.source, time: () => t, measure: measureTex, title: () => doc.name,
     snapshot: (url, name) => { const a = document.createElement('a'); a.href = url; a.download = name; a.click(); },
   });
+  const ink = new Ink(viewer);   // read-only here: never switched on, so it only draws the page's saved strokes
+  ink.set(doc.ink);
+  if (ink.strokes.length) $('bpInk').style.display = '';
   const chips = new FigureChips($('bpGl'), viewer, t => explorer.openTarget(t));
   const tour = () => ctx?.cam ?? (() => { const ph = duration > 0 ? t / duration : 0; return { yaw: 0.85 * Math.sin(2 * Math.PI * ph), pitch: 0.5 * Math.sin(Math.PI * ph), zoom: 1 + 0.3 * Math.sin(Math.PI * ph) }; })();
   const applyCam = () => { const c = tour(); viewer.place(c.yaw, c.pitch, c.zoom); };
   const compile = () => {
     try { ctx = runProgram(doc.source, t, { measure: measureTex }); }
     catch (e: any) { $('bpErr').style.display = 'grid'; $('bpErr').textContent = 'This page has an error:\n' + e.message; return; }
-    viewer.build(ctx, []); chips.update(ctx);
+    viewer.build(ctx, []); ink.redraw(); chips.update(ctx);
     usesT = ctx.usesT; duration = ctx.duration ?? 6;
     ($('bpSl') as HTMLInputElement).max = String(duration);
     $('bpT').style.display = usesT || ctx.cam ? 'flex' : 'none';
@@ -84,6 +90,7 @@ async function main() {
   $('bpCam').onclick = () => setFollow(!follow);
   $('bpOrtho').onclick = () => { viewer.setOrtho(!viewer.isOrtho); $('bpOrtho').classList.toggle('on', viewer.isOrtho); };
   $('bpReset').onclick = () => { setFollow(false); viewer.place(0, 0, 1); };
+  $('bpInk').onclick = () => { viewer.ink.visible = !viewer.ink.visible; $('bpInk').classList.toggle('on', viewer.ink.visible); viewer.dirty = true; };
   $('bpExp').onclick = () => { const f = chips.first(); if (f) explorer.openTarget(f); };
   viewer.renderer.domElement.addEventListener('pointerdown', () => { if (follow && !playing) setFollow(false); });
   window.addEventListener('keydown', e => {
@@ -92,12 +99,13 @@ async function main() {
     else if (e.key === 'f' || e.key === 'F') $('bpReset').click();
     else if (e.key === 'o' || e.key === 'O') $('bpOrtho').click();
     else if (e.key === 'e' || e.key === 'E') $('bpExp').click();
+    else if ((e.key === 'i' || e.key === 'I') && ink.strokes.length) $('bpInk').click();
   });
   compile(); $('bpLoad').remove();
   // compact export: when MathJax arrives for labels that weren't pre-typeset, redraw
   onTexUpgrade(() => { compile(); explorer.refresh(); });
   // link to an editable copy (the page code travels inside the link; skipped for very large pages)
-  shareFragment(doc.name, doc.source).then(f => { if (f.length < 30000) { const a = $('bpOpen') as HTMLAnchorElement; a.href = APP_URL + '#' + f; a.style.display = ''; } }).catch(() => {});
+  shareFragment(doc.name, joinInk(doc.source, ink.strokes)).then(f => { if (f.length < 30000) { const a = $('bpOpen') as HTMLAnchorElement; a.href = APP_URL + '#' + f; a.style.display = ''; } }).catch(() => {});
   let last = performance.now();
   const loop = (now: number) => {
     requestAnimationFrame(loop);

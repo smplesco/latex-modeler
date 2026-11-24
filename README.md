@@ -35,7 +35,7 @@ To change the format of any page, use **Page ▾** in the viewer. It rewrites th
 **Ink and live recording.** Press **✎ Ink** (or I) in the viewer to draw on a page:
 - **Pen** in red, blue, green or black/white, and a **highlighter**. Strokes stick to what you draw on: the paper, or a 3D surface, and they turn with it as you orbit (right-drag still turns the page).
 - **Laser pointer**: a red trail that fades after a second, for pointing while you explain.
-- **Undo** (Ctrl+Z) and **Clear**. Ink is kept with the page in your browser, not in its code.
+- **Undo** (Ctrl+Z) and **Clear**. Ink is saved with the page: in the `.bd` file (as one last `//@ink` comment line, which the editor hides and older versions simply skip), in share links, in the interactive HTML export (with an **Ink** button to hide it) and on top of the SVG export.
 - **● Record** films the viewer live, with your microphone if you tick *mic*: draw, orbit, play the timeline and talk, then press Stop to get an MP4 (or WebM).
 
 ---
@@ -180,7 +180,7 @@ Every plot frame on the page, and every hand-drawn 3D figure made with `onpage(.
   * **Page as SVG:** vector output for print or Inkscape.
   * **Page as PNG:** 200 dpi.
   * **Current view as PNG:** what you see on screen.
-  * **Share link:** the page's code compressed into a link (after the `#`, so nothing is uploaded anywhere). Whoever opens it gets a live copy of the page in the web app. Links made in the desktop app point to the GitHub Pages site.
+  * **Share link:** the page's code compressed into a link (after the `#`, so nothing is uploaded anywhere). Whoever opens it gets a live copy of the page in the web app. Links made in the desktop app point to latexmodeler.app.
   * **Interactive HTML (3D):** one self-contained `.html` file with the page, the 3D viewer, the timeline and the Figure Explorer built in. Send it to anyone: it opens in Chrome, Edge, Firefox or Safari by double-clicking it, with nothing to install, and has an **Open in LaTeX Modeler** button for an editable copy. Two sizes:
     * **Compact (≈ 0.7–1 MB):** every label on the page is pre-rendered inside the file. Works offline; only brand-new labels (e.g. tick numbers after zooming in the explorer, or text that changes continuously while playing) fetch the LaTeX engine from the internet.
     * **Full (≈ 2.8 MB):** includes the whole LaTeX engine, so everything works offline, always.
@@ -243,13 +243,15 @@ public/board/ board mode (Screenboard): one self-contained page, its service wor
               and its libraries in lib/ (MathJax, jsPDF, JSZip, PDF.js, PeerJS), served at /board/
 figure.html + src/figure.ts  the figure host boards embed: auto-model, draw a page or one figure, orbit, picture
 src/render/ink.ts  pen, highlighter and laser on pages
-src-tauri/    desktop wrapper (Rust): dialogs, file access, .bd file association
+src-tauri/    desktop wrapper (Rust): dialogs, file access, .bd and .screenboard file associations
+src/sw-template.js + src/offline.ts  the web app's service worker (vite.config.ts fills in the file list at build time)
+src/inkfile.ts  how ink is written into and read back out of a .bd file
 tests/run.ts  auto-model corpus, calculus, examples and templates
 tests/board-smoke.mjs  board mode in a real browser (`npm run test:board`; first time: `npx playwright install chromium`)
 .github/workflows/  CI, desktop release builds, GitHub Pages
 ```
 
-Everything runs locally: MathJax, fonts, three.js and the board libraries are bundled, so the desktop app works offline. The only outside connection is the PeerJS matchmaking server, for live board sessions. See [SECURITY.md](SECURITY.md).
+Everything runs locally: MathJax, fonts, three.js and the board libraries are bundled, so the desktop app works offline. The web version works offline too after one visit: pages, examples, board mode and 3D figures on boards are all kept by the browser. In the desktop app, double-clicking a `.screenboard` file opens it in board mode. The only outside connection is the PeerJS matchmaking server, for live board sessions. See [SECURITY.md](SECURITY.md).
 
 ---
 

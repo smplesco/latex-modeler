@@ -17,7 +17,8 @@ function col(c: string): [string, number] {
 const f = (v: number) => +v.toFixed(3);
 const hex = (r: number, g: number, b: number) => '#' + [r, g, b].map(v => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, '0')).join('');
 
-export function exportSVG(ctx: RunCtx): string {
+/** the page as SVG; `extra` is drawn on top of everything (the page's ink) */
+export function exportSVG(ctx: RunCtx, extra = ''): string {
   const { w, h, style } = ctx.page; const ps = PAGE_STYLES[style];
   const Y = (y: number) => h - y;
   type Item = { z: number; o: number; s: string };
@@ -104,7 +105,7 @@ export function exportSVG(ctx: RunCtx): string {
 ${grid}
 ${flat.map(i => i.s).join('\n')}
 ${solid.map(i => i.s).join('\n')}
-${top.map(i => i.s).join('\n')}
+${top.map(i => i.s).join('\n')}${extra ? '\n<g id="ink">\n' + extra + '\n</g>' : ''}
 </svg>
 `;
 }

@@ -21,6 +21,7 @@ export class Ink {
   private lasers: { line: Line2; mat: LineMaterial; t: number }[] = [];
   private ray = new THREE.Raycaster();
   private saved: any = null;
+  private stencil = 0;
 
   constructor(private v: Viewer) {
     const el = v.renderer.domElement;
@@ -83,6 +84,13 @@ export class Ink {
     const [w, h] = this.v.size();
     const m = new LineMaterial({ color: new THREE.Color(s.color).getHex(), linewidth: 2, transparent: true, opacity: s.tool === 'hl' ? 0.38 : laser ? 0.9 : 1, depthWrite: false });
     m.userData.wmm = s.w; m.resolution.set(w, h); this.v.inkMats.push(m);
+    if (s.tool === 'hl' || laser) {
+      // see-through strokes: the segments of one line overlap at every joint and would blend twice there
+      // (darker blobs along a highlighter). The stencil lets each stroke cover a pixel once; every stroke gets
+      // its own number, so two different highlighter strokes still stack like real ink.
+      this.stencil = this.stencil % 255 + 1;
+      Object.assign(m, { stencilWrite: true, stencilRef: this.stencil, stencilFunc: THREE.NotEqualStencilFunc, stencilZPass: THREE.ReplaceStencilOp });
+    }
     const l = new Line2(g, m); l.renderOrder = s.tool === 'hl' ? 199990 : 200000; l.computeLineDistances();
     return l;
   }

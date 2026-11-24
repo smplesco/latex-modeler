@@ -3,7 +3,7 @@
 // Format: #s=<z|u><base64url>  (z = deflate-raw compressed JSON, u = uncompressed JSON) of {n: name, s: source}
 
 /** where the web app lives; links made by the desktop app (or an exported page) point here */
-export const APP_URL = 'https://smplesco.github.io/latex-modeler/';
+export const APP_URL = 'https://latexmodeler.app/';
 const MAX_SOURCE = 1_000_000; // refuse absurd payloads (and decompression bombs)
 
 const b64url = (u8: Uint8Array) => {
