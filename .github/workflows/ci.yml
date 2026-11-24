@@ -30,9 +30,11 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
+      # GitHub's Ubuntu runners already have Google Chrome, so no browser download is needed
       # a few checks depend on typing and mouse timing, so a slow runner gets one retry
       - run: npm run test:board || npm run test:board
+        env:
+          SB_CHROME: /usr/bin/google-chrome
 
   desktop-check:
     runs-on: windows-latest
