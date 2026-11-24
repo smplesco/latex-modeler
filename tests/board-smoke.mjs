@@ -89,7 +89,7 @@ check('template is added pinned', await ev(()=> page().objects[0].locked===true)
 
 // ---- lining up, smart guides ----
 await ev(()=>{ const s = view().s; const mk = (x, y)=> ({id:uid(), type:'rect', tool:'rect', color:'#fff', size:3, fill:false, dash:false, x:S2W(x,0).x, y:S2W(0,y).y, w:60/s, h:40/s, rot:0});
-  pushUndo(); const a = mk(120, 600), b = mk(150, 660), c = mk(190, 720); page().objects.push(a, b, c); S.selection = [a, b, c]; setTool('select'); S.selection = [a, b, c]; alignSel('l'); });
+  pushUndo(); const a = mk(120, 200), b = mk(150, 260), c = mk(190, 320); page().objects.push(a, b, c); S.selection = [a, b, c]; setTool('select'); S.selection = [a, b, c]; alignSel('l'); });
 check('line up left', await ev(()=> new Set(S.selection.map(o=>Math.round(o.x*100))).size===1));
 await ev(()=>{ S.selection = [S.selection[2]]; });
 const from = await ev(()=>{ const o = S.selection[0], p = W2S(o.x + o.w/2, o.y + o.h/2); return p; });
@@ -118,8 +118,11 @@ check('a board file keeps notes, tables and frames', await ev(()=>{ page().notes
   return p.notes==='say hello' && p.objects.some(o=>o.type==='table') && p.objects.some(o=>o.type==='frame') && p.objects.some(o=>o.note); }));
 
 // ---- find any action ----
+await page.mouse.move(4, 4);   // keep the pointer off the list, or hovering a row picks it instead of the top match
 await page.keyboard.press('Control+k'); await page.waitForSelector('#palette.show'); await shot('palette');
-await page.keyboard.type('surface white'); await page.keyboard.press('Enter');
+await page.keyboard.type('surface white');
+await soon(()=> PAL.shown.length && /white/i.test(PAL.shown[PAL.i].label));
+await page.keyboard.press('Enter');
 check('Ctrl+K runs an action', await soon(()=> S.theme==='whiteboard' && !$('palette').classList.contains('show')));
 check('Ctrl+K lists tools, menu items and boards', await ev(()=>{ const l = paletteItems().map(i=>i.group); return ['Tool','Menu','Add','Setting','Look'].every(g=> l.includes(g)); }));
 
