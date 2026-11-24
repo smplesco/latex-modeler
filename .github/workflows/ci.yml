@@ -30,6 +30,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm run build
       # GitHub's Ubuntu runners already have Google Chrome, so no browser download is needed
       # a few checks depend on typing and mouse timing, so a slow runner gets one retry
       - run: npm run test:board || npm run test:board

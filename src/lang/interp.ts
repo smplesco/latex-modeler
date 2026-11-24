@@ -141,12 +141,13 @@ function makeInterpreter(ctx: RunCtx, root: Env) {
   return { exec, evalNode, call };
 }
 
-export function runProgram(src: string, t: number, hooks: { measure?: (s: string) => number | null; overrides?: Record<string, number> } = {}): RunCtx {
+export function runProgram(src: string, t: number, hooks: { measure?: (s: string) => number | null; overrides?: Record<string, number>; style?: string } = {}): RunCtx {
   const ctx: RunCtx = {
     prims: [], page: { w: 210, h: 297, style: 'paper', stage: 'studio' }, defaults: { color: null, width: 0.25, size: 11 }, usesT: false, duration: null, cam: null,
     out: [], steps: 0, depth: 0, order: 0, line: 1, figs: 0, sites: [], frames: [], hooks: [], figMeta: {}, frameSeq: 0, role: null, overrides: hooks.overrides, call: null as any, pageStyle: null as any, measure: hooks.measure,
   };
-  ctx.pageStyle = () => PAGE_STYLES[ctx.page.style];
+  // hooks.style draws the page as if it were on that paper (a figure placed on a dark board needs light ink)
+  ctx.pageStyle = () => PAGE_STYLES[hooks.style && PAGE_STYLES[hooks.style] ? hooks.style : ctx.page.style];
   const ast = new Parser(lex(src)).program();
   const root = new Env(null, true);
   const I = makeInterpreter(ctx, root);

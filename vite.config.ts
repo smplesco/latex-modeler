@@ -9,6 +9,7 @@ export default defineConfig({
   build: {
     target: 'es2021', chunkSizeWarningLimit: 4000, sourcemap: false,
     // three.js in its own file: it rarely changes, so browsers keep it cached across app updates
-    rollupOptions: { output: { manualChunks: (id) => (id.includes('node_modules/three/') ? 'three' : undefined) } },
+    // two pages: the app, and the figure host that board mode embeds
+    rollupOptions: { input: { main: 'index.html', figure: 'figure.html' }, output: { manualChunks: (id) => (id.includes('node_modules/three/') ? 'three' : undefined) } },
   },
 });

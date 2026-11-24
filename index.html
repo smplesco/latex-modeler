@@ -61,6 +61,7 @@
         <input type="range" id="slider" min="0" max="6" step="0.01" value="0" aria-label="time">
         <span id="tval">t = 0.00</span>
         <button class="vbtn" id="bLook" title="Page size, paper and the stage it sits on">Page ▾</button>
+        <button class="vbtn" id="bInk" title="Draw on the page: pen, highlighter, laser pointer, and live recording (I)">✎ Ink</button>
         <button class="vbtn on" id="bCam" title="Camera follows the timeline (script view() or a turntable tour)">Camera</button>
         <button class="vbtn on" id="bOrtho" title="Orthographic / perspective (O)">Ortho</button>
         <button class="vbtn" id="bReset" title="Back to the page view (F)">Reset</button>
@@ -70,6 +71,22 @@
         <div id="hint">drag to orbit · right-drag to pan · scroll to zoom<br>click any element to jump to its code (Alt+click: inside the helper)</div>
         <div id="pickTip"></div>
         <div id="lookPop"></div>
+        <div id="inkBar" role="toolbar" aria-label="Ink">
+          <button class="ik on" data-tool="pen" title="Pen (P)">Pen</button>
+          <span class="sw" data-c="#e5484d" title="Red"></span><span class="sw" data-c="#2b6cb0" title="Blue"></span><span class="sw" data-c="#2e9e6a" title="Green"></span><span class="sw" data-c="ink" title="Black or white, to match the page"></span>
+          <i class="sep"></i>
+          <button class="ik" data-tool="hl" title="Highlighter (H)">Highlighter</button>
+          <button class="ik" data-tool="laser" title="Laser pointer: fades away (L)">Laser</button>
+          <i class="sep"></i>
+          <button class="ik" data-act="undo" title="Undo the last stroke (Ctrl+Z)">Undo</button>
+          <button class="ik" data-act="clear" title="Remove all ink from this page">Clear</button>
+          <i class="sep"></i>
+          <button class="ik rec" data-act="rec" title="Record what's on screen, with your voice if you like">● Record</button>
+          <label class="mic" title="Record your microphone too"><input type="checkbox" id="inkMic"> mic</label>
+          <span class="rtime" id="recTime"></span>
+          <button class="ik done" data-act="done" title="Stop drawing (Esc)">Done</button>
+          <div class="inote">draw with the left button or one finger · right-drag turns the page · scroll zooms</div>
+        </div>
       </div>
     </div>
   </div>

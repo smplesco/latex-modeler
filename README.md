@@ -15,6 +15,8 @@ Runs in the browser, or as a Windows / macOS / Linux desktop app (Tauri).
 
 **Boards.** Board mode lives at **latexmodeler.app/board**. It's Screenboard, which used to be a separate app: a freehand chalkboard and whiteboard for explaining things on a call, with markers, photos, PDFs, sticky notes, live sessions, recording and a library of your boards. Use **LaTeX Modeler** in its menu (or on its Home screen) to come back to pages. If you used Screenboard at its old address, open it once and press **Move my boards**: your library comes over in one step.
 
+**3D on boards.** Select an equation (or a text box with an equation) on a board and press the cube button, **Make it 3D**: LaTeX Modeler auto-models it and places the 3D figure next to it. Menu → **Add a LaTeX Modeler page** places any example, template or page you have open, as the whole page or just its figure. **Double-click** a figure to turn it around live (Play runs its animation, Open in LaTeX Modeler opens it as a page). Figures are pictures to everything else on the board, so they move, export, print and sync in live sessions like any image.
+
 **Formats.** A page has a size, a paper and a *stage*, the room it sits in:
 ```
 page("A4", "lined", {stage: "desk"})
@@ -29,6 +31,12 @@ page("A4", "lined", {stage: "desk"})
   - float: no sheet, figures float on the page colour
 
 To change the format of any page, use **Page ▾** in the viewer. It rewrites the `page(…)` line, so Ctrl+Z undoes it.
+
+**Ink and live recording.** Press **✎ Ink** (or I) in the viewer to draw on a page:
+- **Pen** in red, blue, green or black/white, and a **highlighter**. Strokes stick to what you draw on: the paper, or a 3D surface, and they turn with it as you orbit (right-drag still turns the page).
+- **Laser pointer**: a red trail that fades after a second, for pointing while you explain.
+- **Undo** (Ctrl+Z) and **Clear**. Ink is kept with the page in your browser, not in its code.
+- **● Record** films the viewer live, with your microphone if you tick *mic*: draw, orbit, play the timeline and talk, then press Stop to get an MP4 (or WebM).
 
 ---
 
@@ -233,6 +241,8 @@ src/
   ui/         start screen (home.ts), card pictures (thumbs.ts), recent boards (boards.ts), reference panel
 public/board/ board mode (Screenboard): one self-contained page, its service worker and manifest,
               and its libraries in lib/ (MathJax, jsPDF, JSZip, PDF.js, PeerJS), served at /board/
+figure.html + src/figure.ts  the figure host boards embed: auto-model, draw a page or one figure, orbit, picture
+src/render/ink.ts  pen, highlighter and laser on pages
 src-tauri/    desktop wrapper (Rust): dialogs, file access, .bd file association
 tests/run.ts  auto-model corpus, calculus, examples and templates
 tests/board-smoke.mjs  board mode in a real browser (`npm run test:board`; first time: `npx playwright install chromium`)

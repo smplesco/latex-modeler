@@ -1,9 +1,10 @@
 // Board mode (Screenboard) smoke test: loads /board in a real browser and exercises the main features.
 //
 //   npx playwright install chromium     (once)
-//   npm run test:board
+//   npm run build && npm run test:board
 //
-// It serves the public/ folder, so the board runs at /board/ exactly as on latexmodeler.app.
+// It serves the built site (dist/), so the board runs at /board/ exactly as on latexmodeler.app,
+// with LaTeX Modeler's figure host next to it for 3D figures on boards.
 // Set SB_CHROME to a Chrome/Chromium binary to use that instead of Playwright's own,
 // and SB_SHOTS to a folder to keep screenshots.
 import http from 'node:http';
@@ -12,8 +13,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
-const TYPES = {'.html':'text/html', '.js':'text/javascript', '.png':'image/png', '.webmanifest':'application/manifest+json', '.txt':'text/plain'};
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'dist');
+if(!fs.existsSync(path.join(root, 'figure.html'))){ console.error('Build the site first: npm run build'); process.exit(1); }
+const TYPES = {'.html':'text/html', '.js':'text/javascript', '.css':'text/css', '.woff2':'font/woff2', '.json':'application/json', '.png':'image/png', '.webmanifest':'application/manifest+json', '.txt':'text/plain'};
 const server = http.createServer((req, res)=>{
   const p = decodeURIComponent(new URL(req.url, 'http://x').pathname), file = path.join(root, p.endsWith('/') ? p + 'index.html' : p);
   if(!file.startsWith(root) || !fs.existsSync(file) || fs.statSync(file).isDirectory()){ res.writeHead(404); res.end(); return; }
@@ -214,6 +216,32 @@ await pop.close();
     try{ await loadLib('./lib/jszip.min.js?x', ()=> false); return false; }catch(e){ return true; } }));
 }
 check('the menu and Home link back to LaTeX Modeler', await ev(()=> new URL($('lmMi').href).pathname==='/' && new URL(document.querySelector('.hm-lm').href).pathname==='/'));
+
+// ---- LaTeX Modeler figures on the board ----
+{
+  const until = (fn, arg, ms=60000)=> page.waitForFunction(fn, arg, {timeout:ms, polling:200}).then(()=> true, ()=> false);
+  await ev(async ()=>{ const r = await texToSvg('z = x^2 - y^2'); const c = S2W(400, 300);
+    placeNew({id:uid(), type:'equation', tool:'equation', tex:'z = x^2 - y^2', svg:r.svg, vw:r.vw, vh:r.vh, color:S.color, size:S.size, x:c.x-100, y:c.y-30, w:200, h:60, rot:0}); });
+  check('an equation offers Make it 3D', await soon(()=> getComputedStyle($('modelBtn')).display!=='none'));
+  await page.click('#modelBtn');
+  check('Make it 3D places a LaTeX Modeler figure', await until(()=> page().objects.some(o=> o.model && o.model.mode==='figure' && o.model.cam && /^data:image\//.test(o.src))));
+  await ev(()=> editObject(page().objects.find(o=> o.model)));
+  check('double-click turns it around live', await until(()=> !!LMF.live && LMF.frame.classList.contains('live'), null, 15000));
+  const fb = await ev(()=>{ const r = LMF.frame.getBoundingClientRect(); return {x:r.x + r.width/2, y:r.y + r.height/2}; });
+  const cam0 = await ev(()=> JSON.stringify(LMF.live.model.cam));
+  await page.mouse.move(fb.x, fb.y); await page.mouse.down(); await page.mouse.move(fb.x + 140, fb.y + 30, {steps:10}); await page.mouse.up();
+  await page.click('#lmDone');
+  check('Done keeps the new view as the picture', await soon(c0=> !LMF.live && JSON.stringify(page().objects.find(o=> o.model).model.cam)!==c0, cam0));
+  await ev(()=> openModelPicker());
+  check('the page picker lists examples and templates', await until(()=> document.querySelectorAll('#lmList .lm-row').length > 20));
+  await page.click('#lmList .lm-row button:last-child');
+  check('a whole page can be placed', await until(()=> page().objects.some(o=> o.model && o.model.mode==='page')));
+  check('models survive saving, and broken ones are dropped', await ev(()=>{
+    const d = JSON.parse(JSON.stringify(boardData(S.pages)));
+    d.pages[S.pages.indexOf(page())].objects.push({id:'zz', type:'image', tool:'image', src:'data:image/png;base64,AAAA', x:0, y:0, w:1, h:1, rot:0, model:{src:5, mode:'x'}});
+    const o = pagesFromData(d)[S.pages.indexOf(page())].objects; return o.filter(x=> x.model).length===2 && o.find(x=> x.id==='zz').model===undefined; }));
+  await ev(()=>{ for(const o of page().objects.filter(o=> o.model)) page().objects.splice(page().objects.indexOf(o), 1); sceneDirty = true; });
+}
 
 // ---- coming back: home, last board, migration from the old saved copy ----
 await ev(async ()=>{ await libSave(true); AUTO.saved = editCount; localStorage.removeItem('sb-news'); });

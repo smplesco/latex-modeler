@@ -81,6 +81,22 @@ Things I especially want to hear about:
   which browsers never send to a server). Anyone with the link can read the page.
 - **Exports** (HTML, video, images, 3D models) are made on your device and
   downloaded. Nothing is uploaded.
+- **Ink** (pen, highlighter) you draw on a page is kept with that page in this
+  browser's storage. It isn't written into the page's code or its `.bd` file.
+- **Live recording** captures only the 3D viewer, plus your microphone if you tick
+  "mic" (the browser asks first). The video is made on your device and downloaded.
+
+## Boards: LaTeX Modeler figures on a board
+
+- A 3D figure or page on a board is a picture plus the LaTeX Modeler page code it
+  came from. The code is run by LaTeX Modeler's own page language, which can't run
+  JavaScript, open other pages or use the network.
+- LaTeX Modeler draws those figures in a frame from the same site
+  (`figure.html`). Board mode only talks to it directly (same origin), and model
+  data coming from a board file goes through the same checks as everything else
+  in the file (size limits, known fields only; anything else is dropped).
+- "Open in LaTeX Modeler" opens a new tab with the page inside the link itself,
+  the same way share links work.
 
 ## Boards: how live sessions work (security model)
 
@@ -132,7 +148,7 @@ first where it normally would. Nothing below is sent anywhere by board mode.
 
 - **Camera** for the camera bubble. The video stays on your screen. It is
   included in a recording only if you record while the bubble is showing.
-- **Microphone** for recordings with sound.
+- **Microphone** for recordings with sound (also on pages, for live recording).
 - **A window or screen** for "Grab a window", which takes one still picture and
   then stops capturing straight away.
 - **Clipboard** to copy a board or selection as a picture, and to paste.

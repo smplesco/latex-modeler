@@ -53,19 +53,24 @@ export class Viewer {
 
   /** probes and helpers drawn by the Figure Explorer; never cleared by build() */
   overlay = new THREE.Group(); overlayMats: LineMaterial[] = [];
+  /** ink drawn on the page (pen, highlighter, laser): widths in mm like the page's own lines, kept across rebuilds */
+  ink = new THREE.Group(); inkMats: LineMaterial[] = [];
   readonly mode: 'page' | 'explore';
-  constructor(public el: HTMLElement, opts: { mode?: 'page' | 'explore' } = {}) {
+  /** transparent: no room around the page and a see-through background (figures placed on a board) */
+  readonly transparent: boolean;
+  constructor(public el: HTMLElement, opts: { mode?: 'page' | 'explore'; transparent?: boolean } = {}) {
     this.mode = opts.mode ?? 'page';
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: this.mode === 'explore' });
+    this.transparent = !!opts.transparent;
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: this.transparent, preserveDrawingBuffer: this.mode === 'explore' || this.transparent });
     // render at ≥1.5× even on standard screens: smoother glyph edges and hairlines
     this.renderer.setPixelRatio(Math.min(2, Math.max(1.5, window.devicePixelRatio || 1)));
     Object.assign(this.renderer.domElement.style, { display: 'block', width: '100%', height: '100%' });
     el.prepend(this.renderer.domElement);
-    this.scene.background = new THREE.Color(this.mode === 'explore' ? '#fbfcfd' : '#202124');
+    this.scene.background = this.transparent ? null : new THREE.Color(this.mode === 'explore' ? '#fbfcfd' : '#202124');
     this.scene.add(new THREE.AmbientLight(0xffffff, 1.55));
     const sun = new THREE.DirectionalLight(0xffffff, 1.7); sun.position.set(-0.4, 0.8, 1); this.scene.add(sun);
     const sun2 = new THREE.DirectionalLight(0xffffff, 0.55); sun2.position.set(0.6, -0.3, -0.6); this.scene.add(sun2);
-    this.scene.add(this.content); this.scene.add(this.overlay);
+    this.scene.add(this.content); this.scene.add(this.overlay); this.scene.add(this.ink);
     this.camera = this.ortho;
     this.controls = this.makeControls();
     new ResizeObserver(() => this.resize()).observe(el);
@@ -112,7 +117,7 @@ export class Viewer {
     this.renderer.setSize(w, h, false);
     this.persp.aspect = w / h; this.persp.updateProjectionMatrix();
     this.updateOrtho();
-    for (const m of [...this.lineMats, ...this.overlayMats]) m.resolution.set(w, h);
+    for (const m of [...this.lineMats, ...this.overlayMats, ...this.inkMats]) m.resolution.set(w, h);
     this.dirty = true;
   }
   center() { return new THREE.Vector3(this.page.w / 2, this.page.h / 2, 0); }
@@ -163,6 +168,7 @@ export class Viewer {
       if (px >= 1) { m.linewidth = px; m.opacity = op; } else { m.linewidth = 1; m.opacity = op * Math.max(0.3, px); }
     }
     for (const m of this.overlayMats) m.linewidth = m.userData.px ?? 2;
+    for (const m of this.inkMats) m.linewidth = Math.max(1.5, m.userData.wmm * pxPerMm);
   }
   updateDyn(cam: THREE.Camera = this.camera) {
     const v = new THREE.Vector3(0, 0, 1).applyQuaternion(cam.quaternion);
@@ -302,13 +308,13 @@ export class Viewer {
     const [vw, vh] = this.size(); const pr = this.renderer.getPixelRatio();
     const bg = this.scene.background; this.scene.background = this.stage.sheet === 'none' ? new THREE.Color(this.pageBg) : null;
     this.renderer.setPixelRatio(1); this.renderer.setSize(W, H, false);
-    for (const m of this.lineMats) m.resolution.set(W, H);
+    for (const m of [...this.lineMats, ...this.inkMats]) m.resolution.set(W, H);
     for (const b of this.billboards) b.quaternion.copy(cam.quaternion);
     this.lastDyn = ''; this.updateDyn(cam); this.updateLines(W / this.page.w);
     this.renderer.render(this.scene, cam);
     const url = this.renderer.domElement.toDataURL('image/png');
     this.scene.background = bg; this.renderer.setPixelRatio(pr); this.renderer.setSize(vw, vh, false);
-    for (const m of this.lineMats) m.resolution.set(vw, vh);
+    for (const m of [...this.lineMats, ...this.inkMats]) m.resolution.set(vw, vh);
     this.lastDyn = ''; this.dirty = true; this.render();
     return url;
   }
@@ -375,7 +381,7 @@ export class Viewer {
     if (stage.sheet === 'slab') {
       const top = basic(bg), side = basic(bg.clone().multiplyScalar(0.78));
       const paper = new THREE.Mesh(D(new THREE.BoxGeometry(w, h, thick)), [side, side, side, side, top, side]);
-      paper.position.set(w / 2, h / 2, pageZ - thick / 2); this.content.add(paper);
+      paper.position.set(w / 2, h / 2, pageZ - thick / 2); paper.userData.paper = true; this.content.add(paper);
       if (!this.shadowTex) {
         const c = document.createElement('canvas'); c.width = c.height = 128; const g = c.getContext('2d')!;
         const gr = g.createRadialGradient(64, 64, 10, 64, 64, 64); gr.addColorStop(0, 'rgba(0,0,0,.55)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
@@ -385,7 +391,7 @@ export class Viewer {
       const shadow = new THREE.Mesh(D(new THREE.PlaneGeometry((w + pad) * 1.22, (h + pad) * 1.16)), D(new THREE.MeshBasicMaterial({ map: this.shadowTex, transparent: true, depthWrite: false, opacity: stage.surface ? 0.85 : 1 })));
       shadow.position.set(w / 2 + 2, h / 2 - 3, pageZ - thick - 3); this.content.add(shadow);
     } else if (stage.sheet === 'flat') {
-      const p = new THREE.Mesh(D(new THREE.PlaneGeometry(w, h)), basic(bg)); p.position.set(w / 2, h / 2, pageZ); this.content.add(p);
+      const p = new THREE.Mesh(D(new THREE.PlaneGeometry(w, h)), basic(bg)); p.position.set(w / 2, h / 2, pageZ); p.userData.paper = true; this.content.add(p);
     }
     // printed rules: grid, ruled lines, dots
     if (stage.sheet !== 'none') {
@@ -406,7 +412,7 @@ export class Viewer {
       const S = Math.max(w, h) * 12, tex = this.wood();
       const t = D(tex.clone()); t.needsUpdate = true; t.repeat.set(S / 520, S / 520);
       const desk = new THREE.Mesh(D(new THREE.PlaneGeometry(S, S)), basic('#ffffff', t));
-      desk.position.set(w / 2, h / 2, pageZ - thick - 3.4); this.content.add(desk);
+      desk.position.set(w / 2, h / 2, pageZ - thick - 3.4); desk.userData.paper = true; this.content.add(desk);
     }
     // a framed chalkboard: wooden frame, a ledge with chalk and an eraser
     if (stage.frame) {
@@ -484,7 +490,10 @@ export class Viewer {
 
     // the stage: the room colour, the paper sheet, and any desk or frame around it
     const stage = this.stage = stageOf(pg.stage); this.pageBg = style.bg;
-    if (!explore) { this.scene.background = new THREE.Color(stage.bg ?? style.bg); this.buildStage(stage, style, pg.w, pg.h, pageZ, flatZ, D); }
+    if (!explore) {
+      if (!this.transparent) this.scene.background = new THREE.Color(stage.bg ?? style.bg);
+      this.buildStage(this.transparent ? { ...stage, surface: undefined, frame: false, pad: 0 } : stage, style, pg.w, pg.h, pageZ, flatZ, D);
+    }
 
     // soft drop shadow under every floating figure: its real outline, blurred, offset away from the light
     if (!explore) for (const f of figMin.keys()) {

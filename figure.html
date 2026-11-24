@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LaTeX Modeler figure</title>
+<!-- Embedded by board mode (same site): shows one LaTeX Modeler page or 3D figure, see-through, so it can sit on a board. -->
+<script>
+  window.MathJax = {
+    loader: { load: [] },
+    svg: { fontCache: 'none' },
+    options: { enableMenu: false, renderActions: { assistiveMml: [] } },
+    startup: { typeset: false }
+  };
+</script>
+<script defer src="./vendor/tex-svg-full.js"></script>
+<style>
+  html,body{margin:0;height:100%;background:transparent;overflow:hidden}
+  #gl{position:fixed;inset:0;touch-action:none}
+  #gl.live{cursor:grab}
+  #gl.live:active{cursor:grabbing}
+</style>
+</head>
+<body>
+<div id="gl"></div>
+<script type="module" src="/src/figure.ts"></script>
+</body>
+</html>

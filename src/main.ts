@@ -13,6 +13,7 @@ import { EXAMPLES as LIBRARY, byKey, type LibItem } from './library';
 import { PAGES, PAGE_STYLES, STAGES } from './lang/pages';
 import { Home } from './ui/home';
 import { Thumbs } from './ui/thumbs';
+import { Ink, type Stroke } from './render/ink';
 import type { ModelResult } from './model/generate';
 import { getPlatform, Platform } from './platform';
 import { REFERENCE } from './ui/reference';
@@ -26,7 +27,7 @@ const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replac
 
 // ------------------------------------------------------------------ documents
 // example docs remember which library page they came from (src), so they can be reverted and stay clean until edited
-interface Doc { id: string; name: string; text: string; saved: string; path?: string; example?: boolean; src?: string }
+interface Doc { id: string; name: string; text: string; saved: string; path?: string; example?: boolean; src?: string; ink?: Stroke[] }
 const STORE = 'lm.session.v3', OLD_STORE = 'bdraw.session.v2';
 let docs: Doc[] = [], current = '';          // current = '' → the start screen
 const original = (d: Doc) => (d.example ? byKey(d.src)?.src : undefined);
@@ -60,6 +61,7 @@ const slug = (name: string) => name.replace(/\.bd$/, '').replace(/[^A-Za-z0-9-]/
 let platform: Platform;
 const editor = new Editor($('editor'));
 const viewer = new Viewer($('gl'));
+const ink = new Ink(viewer);
 // ---- Figure Explorer: open any figure as a live 3D / 2D graph
 // the Figure Explorer is loaded the first time someone opens a figure (keeps start-up light)
 let explorer: Explorer | null = null, explorerLoad: Promise<Explorer> | null = null;
@@ -117,12 +119,15 @@ function openDoc(id: string) {
   home?.el.classList.remove('show');
   updateTabs(); persist();
   editor.value = d.text;
+  ink.set(d.ink);
   setHash(slug(d.name));
   if (leaving) { viewer.resize(); editor.refresh(); }
   tCur = 0; firstFit = true; compile(true);
 }
 function showHome() {
   if (playing) setPlaying(false);
+  if (rec) stopRec();
+  setInk(false);
   current = ''; setHash('');
   lookPop.classList.remove('show'); $('bLook').classList.remove('on');
   if (explorer?.isOpen) explorer.close();
@@ -237,6 +242,7 @@ function compile(force: boolean) {
   editor.setError(0);
   const warnings: { line: number; msg: string }[] = [];
   viewer.build(ctx, warnings);
+  ink.redraw();   // the paper's depth can change with the page
   chips.update(ctx);
   if (!playing && !recordingNow) viewer.highlight(editorRecs());
   problems = [...warnings.map(w => ({ sev: 'w' as const, ...w })), ...modelWarnings.map(m => ({ sev: 'w' as const, line: 0, msg: m }))];
@@ -663,10 +669,13 @@ window.addEventListener('keydown', e => {
   if (mod && e.key.toLowerCase() === 'o') { e.preventDefault(); $('bOpen').click(); return; }
   if (mod && e.key.toLowerCase() === 'm') { e.preventDefault(); if (!current) home.focusEquation(); else { mIn.focus(); mIn.select(); } return; }
   if (mod && e.altKey && e.key.toLowerCase() === 'n') { e.preventDefault(); $('bNew').click(); return; }
-  if (e.key === 'Escape') { closeModal(); exportMenu.classList.remove('show'); lookPop.classList.remove('show'); $('bLook').classList.remove('on'); }
+  if (e.key === 'Escape') { closeModal(); exportMenu.classList.remove('show'); lookPop.classList.remove('show'); $('bLook').classList.remove('on'); if (ink.on && !rec) setInk(false); }
   if (!current) return;   // the start screen has no viewer shortcuts
   const typing = document.activeElement === editor.ta || document.activeElement === mIn || (document.activeElement as HTMLElement)?.tagName === 'SELECT';
+  if (ink.on && mod && e.key.toLowerCase() === 'z' && !typing) { e.preventDefault(); ink.undo(); return; }
   if (typing || mod || e.altKey) return;
+  if (e.key === 'i' || e.key === 'I') { setInk(!ink.on); return; }
+  if (ink.on && /^[phl]$/i.test(e.key)) { pickTool(({ p: 'pen', h: 'hl', l: 'laser' } as const)[e.key.toLowerCase() as 'p' | 'h' | 'l']); return; }
   if (e.code === 'Space') { e.preventDefault(); setPlaying(!playing); }
   else if (e.key === 'f' || e.key === 'F') $('bReset').click();
   else if (e.key === 'o' || e.key === 'O') $('bOrtho').click();
@@ -682,12 +691,86 @@ split.addEventListener('pointerdown', e => {
   split.addEventListener('pointermove', mv); split.addEventListener('pointerup', up);
 });
 
+// ------------------------------------------------------------------ ink, laser and live recording
+const inkBar = $('inkBar');
+ink.onChange = () => { const d = doc(); if (!d) return; d.ink = ink.strokes.length ? ink.strokes.map(s => ({ ...s, pts: s.pts.map(v => +v.toFixed(2)) })) : undefined; persist(); };
+function setInk(on: boolean) {
+  if (on && !current) return;
+  ink.setOn(on); inkBar.classList.toggle('show', on); $('bInk').classList.toggle('on', on); $('gl').classList.toggle('inking', on);
+  if (on) { followCam = false; $('bCam').classList.remove('on'); syncSwatch(); }
+}
+function pickTool(t: 'pen' | 'hl' | 'laser') {
+  ink.tool = t;
+  inkBar.querySelectorAll<HTMLElement>('[data-tool]').forEach(b => b.classList.toggle('on', b.dataset.tool === t));
+  if (t === 'hl') ink.color = '#ffd400'; else if (t === 'pen') syncSwatch();
+}
+let swatch = '#e5484d';
+function syncSwatch() {
+  const dark = !!(lastCtx && PAGE_STYLES[lastCtx.page.style]?.dark);
+  if (ink.tool === 'pen') ink.color = swatch === 'ink' ? (dark ? '#f4f4f4' : '#111111') : swatch;
+  inkBar.querySelectorAll<HTMLElement>('.sw').forEach(b => b.classList.toggle('on', b.dataset.c === swatch));
+}
+inkBar.querySelectorAll<HTMLElement>('.sw').forEach(b => b.onclick = () => { swatch = b.dataset.c!; pickTool('pen'); syncSwatch(); });
+inkBar.querySelectorAll<HTMLElement>('[data-tool]').forEach(b => b.onclick = () => pickTool(b.dataset.tool as any));
+inkBar.querySelectorAll<HTMLElement>('[data-act]').forEach(b => b.onclick = () => {
+  const a = b.dataset.act;
+  if (a === 'undo') ink.undo();
+  else if (a === 'clear') ink.clear();
+  else if (a === 'done') { if (rec) stopRec(); setInk(false); }
+  else if (a === 'rec') rec ? stopRec() : startRec();
+});
+$('bInk').onclick = () => setInk(!ink.on);
+
+/* live recording: whatever happens in the viewer (orbiting, ink, the laser, the timeline playing), straight to a video file */
+let rec: { mr: MediaRecorder; chunks: Blob[]; mic: MediaStream | null; t0: number; timer: number; type: string } | null = null;
+function recType(): string {
+  for (const t of ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'])
+    if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(t)) return t;
+  return '';
+}
+async function startRec() {
+  const type = recType();
+  if (!type || !(viewer.renderer.domElement as any).captureStream) { toast("this browser can't record the viewer: use Export → Video instead"); return; }
+  let mic: MediaStream | null = null;
+  if (($('inkMic') as HTMLInputElement).checked) {
+    try { mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }); }
+    catch { toast('no microphone: recording without sound'); }
+  }
+  const stream = (viewer.renderer.domElement as HTMLCanvasElement).captureStream(30);
+  if (mic) for (const tr of mic.getAudioTracks()) stream.addTrack(tr);
+  const mr = new MediaRecorder(stream, { mimeType: type, videoBitsPerSecond: 8_000_000 });
+  const chunks: Blob[] = [];
+  mr.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+  mr.onstop = async () => {
+    mic?.getTracks().forEach(t => t.stop());
+    const blob = new Blob(chunks, { type: type.split(';')[0] });
+    const ext = type.startsWith('video/mp4') ? 'mp4' : 'webm';
+    if (!blob.size) { toast('nothing was recorded'); return; }
+    await platform.exportFile(`${baseName()}-recording.${ext}`, new Uint8Array(await blob.arrayBuffer()), type.split(';')[0]);
+    toast(`recording saved (${(blob.size / 1e6).toFixed(1)} MB)`);
+  };
+  mr.start(1000);
+  rec = { mr, chunks, mic, t0: performance.now(), type, timer: 0 };
+  const b = inkBar.querySelector<HTMLElement>('[data-act=rec]')!; b.classList.add('live'); b.textContent = '■ Stop';
+  const tick = () => { if (!rec) return; const s = Math.floor((performance.now() - rec.t0) / 1000); $('recTime').textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+  tick(); rec.timer = window.setInterval(tick, 500);
+  toast('recording: draw, orbit and talk. Press Stop when you are done');
+}
+function stopRec() {
+  if (!rec) return;
+  const r = rec; rec = null; clearInterval(r.timer);
+  try { r.mr.stop(); } catch { /* ignore */ }
+  const b = inkBar.querySelector<HTMLElement>('[data-act=rec]')!; b.classList.remove('live'); b.textContent = '● Record'; $('recTime').textContent = '';
+}
+
 // ------------------------------------------------------------------ main loop
 let lastFrame = performance.now();
 function frame(now: number) {
   requestAnimationFrame(frame);
   const dt = Math.min(0.1, (now - lastFrame) / 1000); lastFrame = now;
   if (playing) { let t = tCur + dt; if (t >= duration) t %= duration; setTime(t); viewer.dirty = true; }
+  ink.tick(now);
+  if (rec) viewer.dirty = true;   // recording: keep frames coming even when nothing moves
   viewer.tick();
   chips.position();
 }
