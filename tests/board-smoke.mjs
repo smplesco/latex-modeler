@@ -67,7 +67,7 @@ await shot('board-note');
 
 // ---- sums ----
 await ev(()=>{ setTool('text'); openTextEditor(S2W(200, 520), null); });
-await page.waitForSelector('#ta'); await page.keyboard.type('3.2*9.81 =');
+await page.waitForSelector('#ta'); await soon(()=> editing && document.activeElement===editing.ta); await page.focus('#ta'); await page.keyboard.type('3.2*9.81 =');
 check('a sum ending in = offers the answer', await soon(()=> !$('tpCalc').hidden && $('tpCalc').textContent==='= 31.392'), await ev(()=> $('tpCalc').textContent));
 await page.keyboard.press('Tab');
 check('Tab fills the answer in', await soon(()=> editing && editing.ta.value==='3.2*9.81 = 31.392'));
@@ -120,6 +120,7 @@ check('a board file keeps notes, tables and frames', await ev(()=>{ page().notes
 // ---- find any action ----
 await page.mouse.move(4, 4);   // keep the pointer off the list, or hovering a row picks it instead of the top match
 await page.keyboard.press('Control+k'); await page.waitForSelector('#palette.show'); await shot('palette');
+await soon(()=> document.activeElement===$('palIn')); await page.focus('#palIn');   // typing before the box has focus would hit board shortcuts
 await page.keyboard.type('surface white');
 await soon(()=> PAL.shown.length && /white/i.test(PAL.shown[PAL.i].label));
 await page.keyboard.press('Enter');
